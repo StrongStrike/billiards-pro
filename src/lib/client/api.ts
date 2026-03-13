@@ -26,7 +26,17 @@ export function buildApiUrl(path: string) {
   }
 
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return isExternalApiMode() ? `${getApiBaseUrl()}${normalizedPath}` : normalizedPath;
+  if (!isExternalApiMode()) {
+    return normalizedPath;
+  }
+
+  const base = getApiBaseUrl();
+  const dedupedPath =
+    base.endsWith("/api") && (normalizedPath === "/api" || normalizedPath.startsWith("/api/"))
+      ? normalizedPath.slice(4) || "/"
+      : normalizedPath;
+
+  return `${base}${dedupedPath}`;
 }
 
 function buildHeaders(init?: HeadersInit) {

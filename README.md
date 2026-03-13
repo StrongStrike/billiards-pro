@@ -18,12 +18,12 @@ Bu hostingda tashqi `5432` port yopiq bo'lgani uchun `Vercel -> PostgreSQL` to'g
 Hozirgi hostingda darhol ishlaydigan variant:
 
 - frontend: `https://your-project.vercel.app`
-- backend: `https://cp70.sp-server.net/~odilbek/api`
+- backend: `https://cp70.sp-server.net/~odilbek`
 
 Eng sodda custom-domain variant:
 
 - frontend: `https://your-project.vercel.app`
-- backend: `https://elite-electronics.uz/api`
+- backend: `https://elite-electronics.uz`
 
 Yaxshiroq variant:
 
@@ -51,7 +51,7 @@ Yaxshiroq variant:
 Frontend tashqi API bilan ishlashi uchun `.env.local` ichida kamida shuni kiriting:
 
 ```env
-NEXT_PUBLIC_API_BASE_URL=https://cp70.sp-server.net/~odilbek/api
+NEXT_PUBLIC_API_BASE_URL=https://cp70.sp-server.net/~odilbek
 ```
 
 Shundan keyin:
@@ -92,10 +92,12 @@ SEED_ADMIN_NAME=Aziz Manager
 Backend hozir quyidagi URL da ishlayapti:
 
 ```text
-https://cp70.sp-server.net/~odilbek/api
+https://cp70.sp-server.net/~odilbek
 ```
 
-`elite-electronics.uz` DNS yoki WHM tomondan to'g'ri ulangach, xohlasangiz backend ni keyin `https://elite-electronics.uz/api` ga ko'chirasiz.
+Frontend ichida API route lar `/api/...` ko'rinishida chaqiriladi, shuning uchun env bazasi `.../~odilbek` bilan tugashi kerak. `.../~odilbek/api` yozilsa login `api/api/...` ga ketadi.
+
+`elite-electronics.uz` DNS yoki WHM tomondan to'g'ri ulangach, xohlasangiz backend ni keyin `https://elite-electronics.uz` ga ko'chirasiz.
 
 ## cPanel config.local.php namunasi
 
