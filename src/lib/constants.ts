@@ -23,3 +23,10 @@ export const tableStatusCopy = {
   active: { label: "Band", className: "text-[#2DFF8A] bg-[#2DFF8A]/10 ring-[#2DFF8A]/40" },
   reserved: { label: "Bron", className: "text-[#F4C34E] bg-[#F4C34E]/10 ring-[#F4C34E]/40" },
 } as const;
+
+export const reservationStatusCopy = {
+  scheduled: { label: "Rejada", className: "text-[#F4C34E] bg-[#F4C34E]/10 ring-[#F4C34E]/40" },
+  arrived: { label: "Keldi", className: "text-[#2DFF8A] bg-[#2DFF8A]/10 ring-[#2DFF8A]/40" },
+  completed: { label: "Yakunlandi", className: "text-cyan-200 bg-cyan-300/10 ring-cyan-300/30" },
+  cancelled: { label: "Bekor", className: "text-slate-300 bg-white/8 ring-white/10" },
+} as const;

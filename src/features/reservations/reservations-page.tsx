@@ -6,14 +6,18 @@ import { useQueryClient } from "@tanstack/react-query";
 import { formatInTimeZone } from "date-fns-tz";
 import { CalendarClock, CheckCircle2, CircleX, WandSparkles } from "lucide-react";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
+import { Reveal, Stagger, StaggerItem } from "@/components/ui/reveal";
+import { Select } from "@/components/ui/select";
 import { patchJson, postJson } from "@/lib/client/api";
+import { reservationStatusCopy } from "@/lib/constants";
 import { useBootstrapQuery } from "@/lib/hooks/use-club-data";
 import { fromLocalDateTime } from "@/lib/time";
-import { formatDateTimeLabel } from "@/lib/utils";
-import { EmptyState, SectionHeader } from "@/features/shared";
+import { formatClock, formatDateTimeLabel } from "@/lib/utils";
+import { EmptyState, MetricCard, SectionHeader } from "@/features/shared";
 
 type ReservationFormValues = {
   tableId: string;
@@ -63,10 +67,12 @@ export function ReservationsPage() {
 
   const dayReservations = useMemo(
     () =>
-      (bootstrapQuery.data?.reservations ?? []).filter(
-        (reservation) =>
-          formatInTimeZone(reservation.startAt, timezone, "yyyy-MM-dd") === resolvedSelectedDay,
-      ),
+      [...(bootstrapQuery.data?.reservations ?? [])]
+        .filter(
+          (reservation) =>
+            formatInTimeZone(reservation.startAt, timezone, "yyyy-MM-dd") === resolvedSelectedDay,
+        )
+        .sort((left, right) => left.startAt.localeCompare(right.startAt)),
     [bootstrapQuery.data?.reservations, resolvedSelectedDay, timezone],
   );
 
@@ -74,8 +80,12 @@ export function ReservationsPage() {
     return <Panel className="min-h-[60vh] animate-pulse bg-white/5" />;
   }
 
-  const { tables, reservations, settings } = bootstrapQuery.data;
+  const { tables, settings } = bootstrapQuery.data;
   const slots = slotLabels();
+  const dayGuests = dayReservations.reduce((sum, reservation) => sum + reservation.guests, 0);
+  const dayScheduled = dayReservations.filter((reservation) => reservation.status === "scheduled").length;
+  const dayArrived = dayReservations.filter((reservation) => reservation.status === "arrived").length;
+  const dayCompleted = dayReservations.filter((reservation) => reservation.status === "completed").length;
 
   async function postReservation(values: ReservationFormValues) {
     await postJson<{ ok: true }>("/api/reservations", {
@@ -114,11 +124,22 @@ export function ReservationsPage() {
         description="Ichki paneldan bron yaratish, kunlik timeline bo&#39;yicha ko&#39;rish va kelgan mijozni seansga aylantirish."
       />
 
-      <div className="grid gap-5 xl:grid-cols-[0.9fr_1.1fr]">
-        <Panel>
+      <Stagger className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StaggerItem><MetricCard label="Tanlangan kun" value={`${dayReservations.length}`} accent="amber" hint="Jami bronlar" /></StaggerItem>
+        <StaggerItem><MetricCard label="Rejalashtirilgan" value={`${dayScheduled}`} accent="cyan" hint="Kelishi kutilmoqda" /></StaggerItem>
+        <StaggerItem><MetricCard label="Kelganlar" value={`${dayArrived}`} accent="green" hint="Faol seans bilan" /></StaggerItem>
+        <StaggerItem><MetricCard label="Mehmonlar" value={`${dayGuests}`} accent="slate" hint={`Yakunlangan: ${dayCompleted}`} /></StaggerItem>
+      </Stagger>
+
+      <div className="grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
+        <Reveal>
+          <Panel tone="cyan" className="hud-frame self-start xl:sticky xl:top-4">
           <div className="flex items-center justify-between">
             <div className="font-display text-2xl font-bold text-white">Yangi bron</div>
             <CalendarClock className="h-5 w-5 text-cyan-200" />
+          </div>
+          <div className="mt-3 text-sm leading-7 text-slate-400">
+            Operator bir necha soniyada stol, vaqt oralig&#39;i va mijozni biriktirib yangi bron ochadi.
           </div>
           <form
             className="mt-6 space-y-4"
@@ -153,17 +174,14 @@ export function ReservationsPage() {
           >
             <div>
               <label className="mb-2 block text-sm text-slate-400">Stol</label>
-              <select
-                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white"
-                {...register("tableId", { required: true })}
-              >
+              <Select {...register("tableId", { required: true })}>
                 <option value="">Stol tanlang</option>
                 {tables.map((table) => (
                   <option key={table.id} value={table.id}>
                     {table.name}
                   </option>
                 ))}
-              </select>
+              </Select>
               {errors.tableId ? <div className="mt-2 text-sm text-rose-300">Stol tanlanishi kerak</div> : null}
             </div>
             <div className="grid gap-4 md:grid-cols-2">
@@ -210,10 +228,12 @@ export function ReservationsPage() {
               </div>
             ) : null}
           </form>
-        </Panel>
+          </Panel>
+        </Reveal>
 
-        <div className="space-y-5">
-          <Panel>
+        <div className="min-w-0 space-y-5">
+          <Reveal>
+            <Panel tone="amber" className="hud-frame min-w-0">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <div className="font-display text-2xl font-bold text-white">Kunlik timeline</div>
@@ -221,24 +241,54 @@ export function ReservationsPage() {
                   30 daqiqalik slotlar bo&#39;yicha barcha stollar kesimi.
                 </div>
               </div>
-              <Input
-                type="date"
-                className="max-w-48"
-                value={resolvedSelectedDay}
-                onChange={(event) => setSelectedDay(event.target.value)}
-              />
+              <div className="w-full max-w-52">
+                <Input
+                  type="date"
+                  className="max-w-52"
+                  value={resolvedSelectedDay}
+                  onChange={(event) => setSelectedDay(event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-wrap items-center gap-2">
+              {(["scheduled", "arrived", "completed", "cancelled"] as const).map((status) => (
+                <Badge key={status} className={reservationStatusCopy[status].className}>
+                  {reservationStatusCopy[status].label}
+                </Badge>
+              ))}
+            </div>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <div className="rounded-[22px] border border-white/8 bg-white/[0.035] px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Tanlangan kun</div>
+                <div className="mt-2 font-display text-xl font-bold text-white">{resolvedSelectedDay}</div>
+              </div>
+              <div className="rounded-[22px] border border-white/8 bg-white/[0.035] px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Timeline oralig&#39;i</div>
+                <div className="mt-2 font-display text-xl font-bold text-white">
+                  {TIMELINE_START_HOUR}:00 - {TIMELINE_END_HOUR}:00
+                </div>
+              </div>
+              <div className="rounded-[22px] border border-white/8 bg-white/[0.035] px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Faol kuzatuv</div>
+                <div className="mt-2 inline-flex items-center gap-2 font-medium text-white">
+                  <span className="signal-dot" />
+                  Stol kesimi bo&#39;yicha
+                </div>
+              </div>
             </div>
 
             <div className="mt-6 overflow-x-auto">
               <div className="min-w-[920px] space-y-3">
                 <div
                   className="grid gap-2 text-xs uppercase tracking-[0.2em] text-slate-500"
-                  style={{ gridTemplateColumns: `180px repeat(${slots.length}, minmax(28px, 1fr))` }}
+                  style={{ gridTemplateColumns: `140px repeat(${slots.length}, minmax(26px, 1fr))` }}
                 >
                   <div>Stol</div>
-                  {slots.map((slot) => (
+                  {slots.map((slot, index) => (
                     <div key={slot} className="text-center">
-                      {slot}
+                      {index % 2 === 0 ? slot : ""}
                     </div>
                   ))}
                 </div>
@@ -248,8 +298,8 @@ export function ReservationsPage() {
                   return (
                     <div
                       key={table.id}
-                      className="grid gap-2 rounded-[24px] border border-white/8 bg-white/[0.03] p-3"
-                      style={{ gridTemplateColumns: `180px repeat(${slots.length}, minmax(28px, 1fr))` }}
+                      className="grid gap-2 rounded-[26px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.02))] p-3"
+                      style={{ gridTemplateColumns: `140px repeat(${slots.length}, minmax(26px, 1fr))` }}
                     >
                       <div className="flex items-center">
                         <div>
@@ -259,7 +309,7 @@ export function ReservationsPage() {
                       </div>
 
                       <div className="relative col-span-full grid" style={{ gridColumn: `2 / span ${slots.length}` }}>
-                        <div className="grid h-16 gap-1" style={{ gridTemplateColumns: `repeat(${slots.length}, minmax(28px, 1fr))` }}>
+                        <div className="grid h-16 gap-1" style={{ gridTemplateColumns: `repeat(${slots.length}, minmax(26px, 1fr))` }}>
                           {slots.map((slot) => (
                             <div key={`${table.id}-${slot}`} className="rounded-xl border border-white/6 bg-white/[0.02]" />
                           ))}
@@ -267,7 +317,7 @@ export function ReservationsPage() {
 
                         <div
                           className="pointer-events-none absolute inset-0 grid"
-                          style={{ gridTemplateColumns: `repeat(${slots.length}, minmax(28px, 1fr))` }}
+                          style={{ gridTemplateColumns: `repeat(${slots.length}, minmax(26px, 1fr))` }}
                         >
                           {tableReservations.map((reservation) => {
                             const startMinutes =
@@ -296,7 +346,7 @@ export function ReservationsPage() {
                             return (
                               <div
                                 key={reservation.id}
-                                className={`pointer-events-auto m-1 flex flex-col justify-center rounded-xl border border-white/10 px-3 text-xs text-white ${accent}`}
+                                className={`pointer-events-auto m-1 flex flex-col justify-center rounded-xl border border-white/10 px-3 text-xs text-white shadow-[0_10px_20px_rgba(0,0,0,0.18)] ${accent}`}
                                 style={{ gridColumn: `${startSlot} / ${Math.max(endSlot, startSlot + 1)}` }}
                               >
                                 <div className="truncate font-semibold">{reservation.customerName}</div>
@@ -314,26 +364,45 @@ export function ReservationsPage() {
                 })}
               </div>
             </div>
-          </Panel>
+            </Panel>
+          </Reveal>
 
-          <Panel>
-            <div className="font-display text-2xl font-bold text-white">Bronlar ro&#39;yxati</div>
-            {reservations.length === 0 ? (
+          <Reveal>
+            <Panel tone="slate" className="hud-frame">
+            <div className="flex items-center justify-between gap-3">
+              <div className="font-display text-2xl font-bold text-white">Kun bo&#39;yicha bronlar</div>
+              <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                {resolvedSelectedDay}
+              </div>
+            </div>
+            {dayReservations.length === 0 ? (
               <div className="mt-4">
-                <EmptyState title="Bronlar yo&#39;q" description="Birinchi bron shu yerda paydo bo&#39;ladi." />
+                <EmptyState
+                  title="Tanlangan kun bo&#39;yicha bron yo&#39;q"
+                  description="Timeline yuqorisidan boshqa kunni tanlang yoki yangi bron yarating."
+                />
               </div>
             ) : (
               <div className="mt-5 space-y-3">
-                {reservations.map((reservation) => (
-                  <div key={reservation.id} className="rounded-[24px] border border-white/8 bg-white/[0.04] p-5">
+                {dayReservations.map((reservation) => (
+                  <div
+                    key={reservation.id}
+                    className="sheen-surface rounded-[26px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.025))] p-5"
+                  >
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                       <div>
-                        <div className="font-semibold text-white">{reservation.customerName}</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="font-semibold text-white">{reservation.customerName}</div>
+                          <Badge className={reservationStatusCopy[reservation.status].className}>
+                            {reservationStatusCopy[reservation.status].label}
+                          </Badge>
+                        </div>
                         <div className="mt-2 text-sm text-slate-400">
-                          {reservation.tableId.replace("table-", "Stol ")} |{" "}
-                          {formatDateTimeLabel(reservation.startAt, settings.timezone)} | {reservation.guests} kishi
+                          {reservation.tableId.replace("table-", "Stol ")} | {formatClock(reservation.startAt, settings.timezone)} -{" "}
+                          {formatClock(reservation.endAt, settings.timezone)} | {reservation.guests} kishi
                         </div>
                         <div className="mt-2 text-sm text-slate-500">{reservation.phone}</div>
+                        {reservation.note ? <div className="mt-2 text-sm text-slate-400">{reservation.note}</div> : null}
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {reservation.status === "scheduled" ? (
@@ -386,7 +455,8 @@ export function ReservationsPage() {
                 ))}
               </div>
             )}
-          </Panel>
+            </Panel>
+          </Reveal>
         </div>
       </div>
     </div>

@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { Activity, CalendarClock, Gamepad2, Martini, WalletCards } from "lucide-react";
+import { Activity, CalendarClock, ChevronRight, Gamepad2, Martini, WalletCards } from "lucide-react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import { Panel } from "@/components/ui/panel";
+import { Reveal, Stagger, StaggerItem } from "@/components/ui/reveal";
 import { useBootstrapQuery, useDashboardActivityQuery } from "@/lib/hooks/use-club-data";
 import { formatClock, formatCurrency } from "@/lib/utils";
 import { MetricCard, SectionHeader, TableCard } from "@/features/shared";
@@ -28,30 +29,49 @@ export function DashboardPage() {
         description="Markazda stol grid, o'ng tomonda klub dinamikasi va bugungi operatsion ko'rsatkichlar."
         action={
           <div className="flex flex-wrap gap-3">
-            <Link href="/stollar" className="text-sm text-cyan-200 hover:text-cyan-100">
+            <Link
+              href="/stollar"
+              className="inline-flex items-center gap-2 rounded-full border border-cyan-300/18 bg-cyan-300/10 px-4 py-2 text-sm text-cyan-100 transition hover:border-cyan-200/36 hover:bg-cyan-300/14"
+            >
               Stollarni boshqarish
+              <ChevronRight className="h-4 w-4" />
             </Link>
-            <Link href="/buyurtmalar" className="text-sm text-slate-300 hover:text-white">
+            <Link
+              href="/buyurtmalar"
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-4 py-2 text-sm text-slate-200 transition hover:border-white/16 hover:bg-white/[0.07] hover:text-white"
+            >
               Bar buyurtmalari
+              <ChevronRight className="h-4 w-4" />
             </Link>
           </div>
         }
       />
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Bugungi tushum" value={formatCurrency(kpis.totalRevenue, settings.currency)} accent="cyan" />
-        <MetricCard label="Band stollar" value={`${kpis.activeTables} / ${tables.length}`} accent="green" />
-        <MetricCard label="Bronlar" value={String(kpis.reservationsToday)} accent="amber" />
-        <MetricCard label="Bar savdosi" value={formatCurrency(kpis.barRevenue, settings.currency)} accent="slate" />
-      </div>
+      <Stagger className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StaggerItem>
+          <MetricCard label="Bugungi tushum" value={formatCurrency(kpis.totalRevenue, settings.currency)} accent="cyan" />
+        </StaggerItem>
+        <StaggerItem>
+          <MetricCard label="Band stollar" value={`${kpis.activeTables} / ${tables.length}`} accent="green" />
+        </StaggerItem>
+        <StaggerItem>
+          <MetricCard label="Bronlar" value={String(kpis.reservationsToday)} accent="amber" />
+        </StaggerItem>
+        <StaggerItem>
+          <MetricCard label="Bar savdosi" value={formatCurrency(kpis.barRevenue, settings.currency)} accent="slate" />
+        </StaggerItem>
+      </Stagger>
 
       <div className={settings.showRightRail ? "dashboard-grid" : "space-y-4"}>
-        <div className="space-y-4">
-          <Panel>
+        <Reveal className="space-y-4">
+          <Panel className="hud-frame">
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <div className="text-xs uppercase tracking-[0.26em] text-cyan-300/70">Stol statusi</div>
                 <div className="mt-2 font-display text-2xl font-bold text-white">7 ta rus billiard stoli</div>
+                <div className="mt-2 max-w-2xl text-sm text-slate-400">
+                  Har bir karta joriy hisob, kutayotgan bron va bar yuklamasini bitta operatsion sirtga jamlaydi.
+                </div>
               </div>
               <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.22em] text-slate-300">
                 15 soniyada yangilanadi
@@ -69,12 +89,13 @@ export function DashboardPage() {
               ))}
             </div>
           </Panel>
-        </div>
+        </Reveal>
 
         {settings.showRightRail ? (
           <div className="space-y-4">
             {settings.showActivityChart ? (
-              <Panel className="min-h-[340px]">
+              <Reveal>
+                <Panel className="min-h-[340px] hud-frame">
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-xs uppercase tracking-[0.26em] text-cyan-300/70">Klub dinamikasi</div>
@@ -83,7 +104,7 @@ export function DashboardPage() {
                   <Activity className="h-6 w-6 text-cyan-200" />
                 </div>
                 <div className="mt-6 h-64">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
                     <AreaChart data={activity}>
                       <defs>
                         <linearGradient id="dashFill" x1="0" y1="0" x2="0" y2="1">
@@ -105,10 +126,12 @@ export function DashboardPage() {
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
-              </Panel>
+                </Panel>
+              </Reveal>
             ) : null}
 
-            <Panel>
+            <Reveal>
+              <Panel className="hud-frame">
               <div className="flex items-center justify-between">
                 <div className="font-display text-2xl font-bold text-white">Yaqin bronlar</div>
                 <CalendarClock className="h-5 w-5 text-amber-200" />
@@ -120,7 +143,7 @@ export function DashboardPage() {
                   .map((reservation) => (
                     <div
                       key={reservation.id}
-                      className="rounded-[22px] border border-white/8 bg-white/[0.04] p-4"
+                      className="rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.03))] p-4"
                     >
                       <div className="flex items-center justify-between gap-4">
                         <div>
@@ -133,12 +156,15 @@ export function DashboardPage() {
                           {formatClock(reservation.startAt, settings.timezone)}
                         </div>
                       </div>
+                      <div className="mt-3 h-px w-full bg-[linear-gradient(90deg,rgba(244,195,78,0.24),transparent)]" />
                     </div>
                   ))}
               </div>
-            </Panel>
+              </Panel>
+            </Reveal>
 
-            <Panel>
+            <Reveal>
+              <Panel className="hud-frame">
               <div className="font-display text-2xl font-bold text-white">Bugungi kesim</div>
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
                 {[
@@ -174,7 +200,8 @@ export function DashboardPage() {
                   </div>
                 ))}
               </div>
-            </Panel>
+              </Panel>
+            </Reveal>
           </div>
         ) : null}
       </div>

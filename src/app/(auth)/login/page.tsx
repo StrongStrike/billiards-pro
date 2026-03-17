@@ -118,11 +118,11 @@ export default function LoginPage() {
           <form className="mt-8 space-y-4" onSubmit={onSubmit}>
             <div>
               <label className="mb-2 block text-sm text-slate-400">Email</label>
-              <Input type="email" placeholder="admin@billiards.uz" {...register("email")} />
+              <Input type="email" autoComplete="username" placeholder="admin@billiards.uz" {...register("email")} />
             </div>
             <div>
               <label className="mb-2 block text-sm text-slate-400">Parol</label>
-              <Input type="password" placeholder="********" {...register("password")} />
+              <Input type="password" autoComplete="current-password" placeholder="********" {...register("password")} />
             </div>
             {error ? (
               <div className="rounded-2xl border border-rose-300/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">

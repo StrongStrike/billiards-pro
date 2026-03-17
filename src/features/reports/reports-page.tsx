@@ -16,6 +16,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
+import { Reveal, Stagger, StaggerItem } from "@/components/ui/reveal";
 import { useBootstrapQuery, useReportsQuery } from "@/lib/hooks/use-club-data";
 import { downloadCsv, formatCurrency, formatDateTimeLabel, formatDuration, toCsv } from "@/lib/utils";
 import { MetricCard, SectionHeader } from "@/features/shared";
@@ -52,6 +53,8 @@ export function ReportsPage() {
 
   const report = reportsQuery.data;
   const { settings } = bootstrapQuery.data;
+  const leadTable = report.topTables[0];
+  const leadProduct = report.topProducts[0];
 
   return (
     <div className="space-y-5">
@@ -77,18 +80,46 @@ export function ReportsPage() {
         }
       />
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Jami tushum" value={formatCurrency(report.revenue, report.currency)} />
-        <MetricCard label="O'yin tushumi" value={formatCurrency(report.gameRevenue, report.currency)} accent="green" />
-        <MetricCard label="Bar tushumi" value={formatCurrency(report.barRevenue, report.currency)} accent="amber" />
-        <MetricCard label="O'yin vaqti" value={formatDuration(report.playMinutes)} accent="slate" />
-      </div>
+      <Stagger className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StaggerItem>
+          <MetricCard
+            label="Jami tushum"
+            value={formatCurrency(report.revenue, report.currency)}
+            hint={`${report.sessionsCount} ta seans`}
+          />
+        </StaggerItem>
+        <StaggerItem>
+          <MetricCard
+            label="O'yin tushumi"
+            value={formatCurrency(report.gameRevenue, report.currency)}
+            accent="green"
+            hint={`${report.occupancyRate}% bandlik`}
+          />
+        </StaggerItem>
+        <StaggerItem>
+          <MetricCard
+            label="Bar tushumi"
+            value={formatCurrency(report.barRevenue, report.currency)}
+            accent="amber"
+            hint={leadProduct ? `${leadProduct.productName} yetakchi` : "Mahsulot ma'lumoti tayyor"}
+          />
+        </StaggerItem>
+        <StaggerItem>
+          <MetricCard
+            label="O'yin vaqti"
+            value={formatDuration(report.playMinutes)}
+            accent="slate"
+            hint={leadTable ? `${leadTable.tableName} eng faol` : "Stollar kesimi"}
+          />
+        </StaggerItem>
+      </Stagger>
 
       <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
-        <Panel className="min-h-[360px]">
+        <Reveal>
+          <Panel className="min-h-[360px] hud-frame" tone="cyan">
           <div className="font-display text-2xl font-bold text-white">Daromad grafigi</div>
           <div className="mt-5 h-72">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
               <LineChart data={report.chart}>
                 <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
                 <XAxis dataKey="label" stroke="#8293ab" tickLine={false} axisLine={false} />
@@ -106,12 +137,14 @@ export function ReportsPage() {
               </LineChart>
             </ResponsiveContainer>
           </div>
-        </Panel>
+          </Panel>
+        </Reveal>
 
-        <Panel className="min-h-[360px]">
+        <Reveal>
+          <Panel className="min-h-[360px] hud-frame" tone="amber">
           <div className="font-display text-2xl font-bold text-white">Bandlik ko&#39;rinishi</div>
           <div className="mt-5 h-72">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
               <BarChart data={report.chart}>
                 <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
                 <XAxis dataKey="label" stroke="#8293ab" tickLine={false} axisLine={false} />
@@ -127,15 +160,50 @@ export function ReportsPage() {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </Panel>
+          </Panel>
+        </Reveal>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-2">
-        <Panel>
+      <div className="grid gap-5 xl:grid-cols-[0.72fr_1fr_1fr]">
+        <Reveal>
+          <Panel tone="slate" className="hud-frame">
+          <div className="font-display text-2xl font-bold text-white">Qisqa insight</div>
+          <div className="mt-5 space-y-3">
+            <div className="sheen-surface rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
+              <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Davr</div>
+              <div className="mt-2 text-sm leading-7 text-white">
+                {formatDateTimeLabel(report.periodStart, report.timezone)} -{" "}
+                {formatDateTimeLabel(report.periodEnd, report.timezone)}
+              </div>
+            </div>
+            <div className="sheen-surface rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
+              <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Eng faol stol</div>
+              <div className="mt-2 font-semibold text-white">{leadTable?.tableName ?? "Ma'lumot yo'q"}</div>
+              <div className="mt-1 text-sm text-slate-400">
+                {leadTable
+                  ? `${formatDuration(leadTable.minutes)} | ${formatCurrency(leadTable.revenue, settings.currency)}`
+                  : "Davr davomida faollik aniqlanmadi"}
+              </div>
+            </div>
+            <div className="sheen-surface rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
+              <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Top mahsulot</div>
+              <div className="mt-2 font-semibold text-white">{leadProduct?.productName ?? "Ma'lumot yo'q"}</div>
+              <div className="mt-1 text-sm text-slate-400">
+                {leadProduct
+                  ? `${leadProduct.quantity} dona | ${formatCurrency(leadProduct.revenue, settings.currency)}`
+                  : "Bar savdosi hali qayd etilmagan"}
+              </div>
+            </div>
+          </div>
+          </Panel>
+        </Reveal>
+
+        <Reveal>
+          <Panel tone="cyan" className="hud-frame">
           <div className="font-display text-2xl font-bold text-white">Eng ko&#39;p ishlagan stollar</div>
           <div className="mt-5 space-y-3">
             {report.topTables.map((table) => (
-              <div key={table.tableId} className="rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
+              <div key={table.tableId} className="sheen-surface rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <div className="font-semibold text-white">{table.tableName}</div>
@@ -148,13 +216,15 @@ export function ReportsPage() {
               </div>
             ))}
           </div>
-        </Panel>
+          </Panel>
+        </Reveal>
 
-        <Panel>
+        <Reveal>
+          <Panel tone="green" className="hud-frame">
           <div className="font-display text-2xl font-bold text-white">Top mahsulotlar</div>
           <div className="mt-5 space-y-3">
             {report.topProducts.map((product) => (
-              <div key={product.productId} className="rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
+              <div key={product.productId} className="sheen-surface rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <div className="font-semibold text-white">{product.productName}</div>
@@ -167,7 +237,8 @@ export function ReportsPage() {
               </div>
             ))}
           </div>
-        </Panel>
+          </Panel>
+        </Reveal>
       </div>
     </div>
   );

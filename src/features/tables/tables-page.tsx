@@ -7,10 +7,12 @@ import { Clock3, CupSoda, Play, Square, Ticket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
+import { Reveal, Stagger, StaggerItem } from "@/components/ui/reveal";
+import { Select } from "@/components/ui/select";
 import { postJson } from "@/lib/client/api";
 import { useBootstrapQuery } from "@/lib/hooks/use-club-data";
 import { formatClock, formatCurrency, formatDuration } from "@/lib/utils";
-import { SectionHeader, TableCard } from "@/features/shared";
+import { MetricCard, SectionHeader, TableCard } from "@/features/shared";
 
 export function TablesPage() {
   const queryClient = useQueryClient();
@@ -45,8 +47,19 @@ export function TablesPage() {
   }
 
   const { tables, products, settings, orders, orderItems } = bootstrapQuery.data;
+  const activeTablesCount = tables.filter((table) => table.status === "active").length;
+  const reservedTablesCount = tables.filter((table) => table.status === "reserved").length;
+  const freeTablesCount = tables.filter((table) => table.status === "free").length;
+  const liveRevenue = tables.reduce((sum, table) => sum + (table.currentSummary?.total ?? 0), 0);
+  const barReserveTotal = tables.reduce((sum, table) => sum + table.pendingOrderTotal, 0);
   const resolvedSelectedTableId = selectedTableId ?? tables[0]?.id ?? null;
   const selectedTable = tables.find((table) => table.id === resolvedSelectedTableId) ?? null;
+  const selectedPanelTone =
+    selectedTable?.status === "active"
+      ? "green"
+      : selectedTable?.status === "reserved"
+        ? "amber"
+        : "slate";
   const selectedSessionOrderItems =
     selectedTable?.activeSession
       ? orderItems
@@ -72,8 +85,40 @@ export function TablesPage() {
         description="Har bir stol uchun start/stop, jonli billing va tezkor bar buyurtmasi."
       />
 
-      <div className="grid gap-5 xl:grid-cols-[1.2fr_0.8fr]">
-        <Panel>
+      <Stagger className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <StaggerItem><MetricCard label="Band stollar" value={`${activeTablesCount}`} accent="green" hint="Faol seanslar" /></StaggerItem>
+        <StaggerItem><MetricCard label="Bo'sh stollar" value={`${freeTablesCount}`} accent="slate" hint="Darhol ochish mumkin" /></StaggerItem>
+        <StaggerItem><MetricCard label="Bron qilingan" value={`${reservedTablesCount}`} accent="amber" hint="Rejalashtirilgan kelishlar" /></StaggerItem>
+        <StaggerItem>
+          <MetricCard
+            label="Jonli hisob"
+            value={formatCurrency(liveRevenue, settings.currency)}
+            accent="cyan"
+            hint="Faol stollar bo'yicha"
+          />
+        </StaggerItem>
+        <StaggerItem>
+          <MetricCard
+            label="Bar rezervi"
+            value={formatCurrency(barReserveTotal, settings.currency)}
+            accent="slate"
+            hint="Tasdiqlangan buyurtmalar"
+          />
+        </StaggerItem>
+      </Stagger>
+
+      <div className="grid gap-5 xl:grid-cols-[1.18fr_0.82fr]">
+        <Reveal>
+          <Panel tone="slate" className="hud-frame">
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <div>
+              <div className="text-xs uppercase tracking-[0.26em] text-cyan-300/70">Live floor map</div>
+              <div className="mt-2 font-display text-2xl font-bold text-white">Zal kesimidagi barcha stollar</div>
+            </div>
+            <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.22em] text-slate-300">
+              Tanlang va boshqaring
+            </div>
+          </div>
           <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
             {tables.map((table) => (
               <TableCard
@@ -87,9 +132,11 @@ export function TablesPage() {
               />
             ))}
           </div>
-        </Panel>
+          </Panel>
+        </Reveal>
 
-        <Panel>
+        <Reveal>
+          <Panel tone={selectedPanelTone} className="hud-frame">
           {selectedTable ? (
             <div>
               <div className="flex items-start justify-between gap-4">
@@ -108,8 +155,8 @@ export function TablesPage() {
 
               {selectedTable.activeSession ? (
                 <div className="mt-6 space-y-4">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="sheen-surface rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
                       <div className="flex items-center gap-2 text-sm text-slate-400">
                         <Clock3 className="h-4 w-4 text-cyan-200" />
                         Faol seans
@@ -121,7 +168,7 @@ export function TablesPage() {
                         Boshlangan: {formatClock(selectedTable.activeSession.startedAt, settings.timezone)}
                       </div>
                     </div>
-                    <div className="rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
+                    <div className="sheen-surface rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
                       <div className="flex items-center gap-2 text-sm text-slate-400">
                         <Ticket className="h-4 w-4 text-emerald-200" />
                         Joriy chek
@@ -131,13 +178,27 @@ export function TablesPage() {
                       </div>
                       <div className="mt-2 text-sm text-slate-400">{selectedTable.activeSession.customerName}</div>
                     </div>
+                    <div className="sheen-surface rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
+                      <div className="flex items-center gap-2 text-sm text-slate-400">
+                        <CupSoda className="h-4 w-4 text-amber-200" />
+                        Bar buyurtma
+                      </div>
+                      <div className="mt-4 font-display text-3xl font-bold text-white">
+                        {formatCurrency(selectedTable.pendingOrderTotal, settings.currency)}
+                      </div>
+                      <div className="mt-2 text-sm text-slate-400">
+                        {selectedSessionOrderItems.length} ta aktiv pozitsiya
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="rounded-[24px] border border-white/8 bg-white/[0.03] p-4">
+                  <div className="hud-frame sheen-surface rounded-[24px] border border-white/8 bg-white/[0.03] p-4">
                     <div className="font-semibold text-white">Bar buyurtma qo&#39;shish</div>
-                    <div className="mt-4 grid gap-3 md:grid-cols-[1fr_110px]">
-                      <select
-                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white"
+                    <div className="mt-2 text-sm text-slate-400">
+                      Tanlangan mahsulot tasdiqlangan stol buyurtmasiga qo&#39;shiladi va checkout vaqtida hisoblanadi.
+                    </div>
+                    <div className="mt-4 grid gap-3 md:grid-cols-[1fr_120px]">
+                      <Select
                         value={productId}
                         onChange={(event) => setProductId(event.target.value)}
                       >
@@ -147,7 +208,7 @@ export function TablesPage() {
                             {product.name} - {formatCurrency(product.price, settings.currency)}
                           </option>
                         ))}
-                      </select>
+                      </Select>
                       <Input
                         type="number"
                         min="1"
@@ -202,6 +263,7 @@ export function TablesPage() {
                   <Button
                     variant="danger"
                     className="w-full justify-center gap-2"
+                    size="lg"
                     onClick={() =>
                       runAction(async () => {
                         await postJson(`/api/tables/${selectedTable.id}/session/stop`, {});
@@ -216,7 +278,7 @@ export function TablesPage() {
               ) : (
                 <div className="mt-6 space-y-4">
                   {selectedTable.nextReservation ? (
-                    <div className="rounded-[22px] border border-amber-300/20 bg-amber-400/8 p-4 text-sm text-amber-100">
+                    <div className="sheen-surface rounded-[22px] border border-amber-300/20 bg-amber-400/8 p-4 text-sm text-amber-100">
                       Keyingi bron: {selectedTable.nextReservation.customerName} |{" "}
                       {formatClock(selectedTable.nextReservation.startAt, settings.timezone)} -{" "}
                       {formatClock(selectedTable.nextReservation.endAt, settings.timezone)}
@@ -240,6 +302,7 @@ export function TablesPage() {
                   </div>
                   <Button
                     className="w-full justify-center gap-2"
+                    size="lg"
                     onClick={() =>
                       runAction(async () => {
                         if (!startCustomer.trim()) {
@@ -268,7 +331,8 @@ export function TablesPage() {
               ) : null}
             </div>
           ) : null}
-        </Panel>
+          </Panel>
+        </Reveal>
       </div>
     </div>
   );

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { AnimatePresence, motion } from "motion/react";
 
 import { AdminShell } from "@/components/admin-shell";
 import { Panel } from "@/components/ui/panel";
@@ -11,6 +12,7 @@ import { useBootstrapQuery } from "@/lib/hooks/use-club-data";
 
 export function ClientAdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const bootstrapQuery = useBootstrapQuery();
 
   useEffect(() => {
@@ -37,8 +39,19 @@ export function ClientAdminLayout({ children }: { children: React.ReactNode }) {
       operator={bootstrapQuery.data.operator}
       clubName={bootstrapQuery.data.settings.clubName}
       timezone={bootstrapQuery.data.settings.timezone}
+      generatedAt={bootstrapQuery.data.generatedAt}
     >
-      {children}
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={pathname}
+          initial={{ opacity: 0, y: 18, filter: "blur(10px)" }}
+          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+          exit={{ opacity: 0, y: -10, filter: "blur(8px)" }}
+          transition={{ duration: 0.38, ease: [0.22, 1, 0.36, 1] }}
+        >
+          {children}
+        </motion.div>
+      </AnimatePresence>
     </AdminShell>
   );
 }

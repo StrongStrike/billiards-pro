@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { Clock3, ReceiptText, Sparkles, UserRound } from "lucide-react";
+import { ArrowRight, Clock3, Dot, ReceiptText, Sparkles, UserRound } from "lucide-react";
+import { motion } from "motion/react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
+import { Reveal } from "@/components/ui/reveal";
 import { TableIllustration } from "@/components/table-illustration";
 import { tableStatusCopy } from "@/lib/constants";
 import { cn, formatClock, formatCurrency, formatDuration } from "@/lib/utils";
@@ -23,14 +25,20 @@ export function SectionHeader({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-      <div>
-        <div className="text-xs uppercase tracking-[0.28em] text-cyan-300/75">{eyebrow}</div>
-        <h2 className="mt-3 font-display text-3xl font-bold text-white">{title}</h2>
-        <p className="mt-2 max-w-3xl text-sm text-slate-400">{description}</p>
+    <Reveal>
+      <div className="page-shell hud-frame relative mb-6 overflow-hidden rounded-[32px] border border-white/6 bg-[linear-gradient(180deg,rgba(255,255,255,0.03),rgba(255,255,255,0.012))] px-5 py-5 lg:flex-row lg:items-end lg:justify-between lg:px-6">
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-[36%] bg-[radial-gradient(circle_at_top_right,rgba(39,230,245,0.12),transparent_62%)]" />
+        <div className="pointer-events-none absolute inset-x-10 bottom-0 h-px bg-[linear-gradient(90deg,transparent,rgba(39,230,245,0.22),transparent)]" />
+        <div className="relative space-y-4">
+          <div className="eyebrow-pill">{eyebrow}</div>
+          <div>
+            <h2 className="lux-title font-display text-3xl font-bold tracking-[-0.03em] md:text-4xl">{title}</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-400 md:text-[15px]">{description}</p>
+          </div>
+        </div>
+        {action ? <div className="relative flex flex-wrap items-center gap-3">{action}</div> : null}
       </div>
-      {action}
-    </div>
+    </Reveal>
   );
 }
 
@@ -61,13 +69,52 @@ export function MetricCard({
         : accent === "slate"
           ? "text-slate-300"
           : "text-[#27E6F5]";
+  const border =
+    accent === "green"
+      ? "border-[#2DFF8A]/18"
+      : accent === "amber"
+        ? "border-[#F4C34E]/18"
+        : accent === "slate"
+          ? "border-white/10"
+          : "border-[#27E6F5]/18";
+  const signal =
+    accent === "green" ? "signal-dot signal-dot--green" : accent === "amber" ? "signal-dot signal-dot--amber" : "signal-dot";
 
   return (
-    <Panel className={`relative overflow-hidden bg-gradient-to-br ${glow}`}>
-      <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{label}</div>
-      <div className={cn("mt-4 font-display text-3xl font-bold", text)}>{value}</div>
-      {hint ? <div className="mt-2 text-sm text-slate-400">{hint}</div> : null}
-    </Panel>
+    <Reveal>
+      <motion.div whileHover={{ y: -4, scale: 1.01 }} transition={{ duration: 0.22 }}>
+        <Panel
+          className={cn(
+            "surface-accent sheen-surface relative overflow-hidden bg-gradient-to-br p-5 md:p-6",
+            glow,
+            border,
+          )}
+          tone={accent === "green" ? "green" : accent === "amber" ? "amber" : accent === "slate" ? "slate" : "cyan"}
+        >
+          <div className="pointer-events-none absolute right-0 top-0 h-28 w-28 rounded-full bg-[radial-gradient(circle,rgba(255,255,255,0.12),transparent_70%)] blur-2xl opacity-60" />
+          <div className="pointer-events-none absolute inset-x-6 bottom-0 h-px bg-[linear-gradient(90deg,rgba(255,255,255,0.08),transparent)]" />
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <span className={signal} />
+                <div className="text-xs uppercase tracking-[0.28em] text-slate-500">{label}</div>
+              </div>
+              {hint ? (
+                <div className="inline-flex items-center rounded-full border border-white/8 bg-white/[0.035] px-3 py-1 text-[10px] uppercase tracking-[0.22em] text-slate-400">
+                  {hint}
+                </div>
+              ) : null}
+            </div>
+            <div className="rounded-full border border-white/8 bg-white/[0.035] px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-slate-400">
+              Real vaqt
+            </div>
+          </div>
+          <div className={cn("mt-5 font-display text-3xl font-bold tracking-[-0.03em] md:text-4xl", text)}>{value}</div>
+          <div className="mt-4 h-px w-full bg-[linear-gradient(90deg,rgba(255,255,255,0.08),transparent)]" />
+          <div className="mt-3 text-xs uppercase tracking-[0.22em] text-slate-500">Operatsion snapshot</div>
+        </Panel>
+      </motion.div>
+    </Reveal>
   );
 }
 
@@ -87,62 +134,105 @@ export function TableCard({
   selected?: boolean;
 }) {
   const status = tableStatusCopy[table.status];
+  const statusAccent =
+    table.status === "active"
+      ? "from-[#2DFF8A]/16 via-[#2DFF8A]/6"
+      : table.status === "reserved"
+        ? "from-[#F4C34E]/18 via-[#F4C34E]/7"
+        : "from-white/8 via-white/4";
 
   return (
-    <button
+    <motion.button
       type="button"
       onClick={onSelect}
+      whileHover={{ y: -6, scale: 1.01 }}
+      transition={{ duration: 0.22 }}
       className={cn(
-        "glass-panel w-full rounded-[28px] p-4 text-left transition duration-200 hover:-translate-y-0.5 hover:border-white/14",
-        compact ? "min-h-[230px]" : "min-h-[285px]",
-        selected ? "border-cyan-300/40 shadow-[0_0_40px_rgba(39,230,245,0.14)]" : "border-white/8",
+        "glass-panel sheen-surface group relative w-full overflow-hidden rounded-[32px] p-4 text-left transition duration-200 hover:border-white/14",
+        compact ? "min-h-[250px]" : "min-h-[300px]",
+        selected
+          ? "border-cyan-300/40 shadow-[0_0_46px_rgba(39,230,245,0.16)]"
+          : "border-white/8 shadow-[0_18px_44px_rgba(0,0,0,0.18)]",
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="font-display text-2xl font-bold text-white">{table.name}</div>
-          <div className="mt-1 text-sm text-slate-400">
-            {table.type === "vip" ? "VIP stol" : "Oddiy stol"} |{" "}
-            {formatCurrency(table.hourlyRate, currency)}
+      <div className={cn("pointer-events-none absolute inset-0 bg-gradient-to-br opacity-80", statusAccent, "to-transparent")} />
+      <div className="pointer-events-none absolute left-0 top-10 h-28 w-1 rounded-r-full bg-[linear-gradient(180deg,rgba(39,230,245,0.7),transparent)] opacity-70" />
+      <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.24),transparent)]" />
+      <div className="relative">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="font-display text-[1.7rem] font-bold tracking-[-0.04em] text-white">{table.name}</div>
+            <div className="mt-1 text-sm text-slate-400">
+              {table.type === "vip" ? "VIP stol" : "Oddiy stol"} <Dot className="mx-1 inline h-4 w-4 text-slate-600" />
+              {formatCurrency(table.hourlyRate, currency)}
+            </div>
+          </div>
+          <div className="space-y-2 text-right">
+            <Badge className={status.className}>{status.label}</Badge>
+            <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">#{table.position}</div>
           </div>
         </div>
-        <Badge className={status.className}>{status.label}</Badge>
-      </div>
 
-      <div className="mt-4">
-        <TableIllustration accentColor={table.accentColor} dimmed={table.status === "free"} />
-      </div>
+        <div className="mt-4 rounded-[24px] border border-white/6 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.06),transparent_62%)] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+          <TableIllustration
+            accentColor={table.accentColor}
+            dimmed={table.status === "free"}
+            className="transition duration-300 group-hover:scale-[1.035] group-hover:-translate-y-1"
+          />
+        </div>
 
-      <div className="mt-4 grid gap-3 text-sm text-slate-300 md:grid-cols-2">
-        <div className="flex items-center gap-2">
-          <UserRound className="h-4 w-4 text-cyan-200" />
-          <span>{table.activeSession?.customerName ?? table.nextReservation?.customerName ?? "Bo'sh stol"}</span>
+        <div className="mt-4 grid gap-3 text-sm text-slate-300 md:grid-cols-2">
+          <div className="rounded-[20px] border border-white/6 bg-white/[0.03] px-3 py-3">
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-slate-500">
+              <UserRound className="h-4 w-4 text-cyan-200" />
+              Mijoz
+            </div>
+            <div className="mt-2 font-medium text-white">
+              {table.activeSession?.customerName ?? table.nextReservation?.customerName ?? "Bo'sh stol"}
+            </div>
+          </div>
+          <div className="rounded-[20px] border border-white/6 bg-white/[0.03] px-3 py-3">
+            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-slate-500">
+              <Clock3 className="h-4 w-4 text-cyan-200" />
+              Holat vaqti
+            </div>
+            <div className="mt-2 font-medium text-white">
+              {table.currentSummary
+                ? formatDuration(table.currentSummary.durationMinutes)
+                : table.nextReservation
+                  ? `${formatClock(table.nextReservation.startAt, timezone)} - ${formatClock(table.nextReservation.endAt, timezone)}`
+                  : "Hozir bo'sh"}
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Clock3 className="h-4 w-4 text-cyan-200" />
-          <span>
-            {table.currentSummary
-              ? formatDuration(table.currentSummary.durationMinutes)
-              : table.nextReservation
-                ? `${formatClock(table.nextReservation.startAt, timezone)} - ${formatClock(table.nextReservation.endAt, timezone)}`
-                : "Hozir bo'sh"}
-          </span>
-        </div>
-      </div>
 
-      <div className="mt-4 flex items-center justify-between gap-3">
-        <div className="text-sm text-slate-400">
-          {table.currentSummary ? "Joriy hisob" : table.nextReservation ? "Keyingi bron" : "Tayyor"}
-        </div>
-        <div className="font-display text-2xl font-bold text-white">
-          {table.currentSummary
-            ? formatCurrency(table.currentSummary.total, currency)
-            : table.nextReservation
-              ? formatClock(table.nextReservation.startAt, timezone)
-              : formatCurrency(table.hourlyRate, currency)}
+        <div className="mt-4 flex items-end justify-between gap-3">
+          <div>
+            <div className="text-xs uppercase tracking-[0.24em] text-slate-500">
+              {table.currentSummary ? "Joriy hisob" : table.nextReservation ? "Keyingi bron" : "Tayyor"}
+            </div>
+            <div className="mt-2 text-sm text-slate-400">
+              {table.pendingOrderTotal > 0
+                ? `Bar buyurtma: ${formatCurrency(table.pendingOrderTotal, currency)}`
+                : "Qo'shimcha buyurtma yo'q"}
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="font-display text-2xl font-bold text-white">
+              {table.currentSummary
+                ? formatCurrency(table.currentSummary.total, currency)
+                : table.nextReservation
+                  ? formatClock(table.nextReservation.startAt, timezone)
+                  : formatCurrency(table.hourlyRate, currency)}
+            </div>
+            <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/[0.035] px-2.5 py-1 text-[11px] uppercase tracking-[0.22em] text-cyan-200">
+              Boshqarish
+              <ArrowRight className="h-3.5 w-3.5" />
+            </div>
+          </div>
         </div>
       </div>
-    </button>
+    </motion.button>
   );
 }
 
@@ -158,12 +248,12 @@ export function EmptyState({
   ctaLabel?: string;
 }) {
   return (
-    <Panel className="flex min-h-56 flex-col items-center justify-center text-center">
+    <Panel className="flex min-h-56 flex-col items-center justify-center text-center" tone="slate">
       <div className="rounded-full border border-cyan-300/20 bg-cyan-300/10 p-4 text-cyan-200">
         <Sparkles className="h-6 w-6" />
       </div>
       <div className="mt-4 font-display text-2xl font-bold text-white">{title}</div>
-      <p className="mt-2 max-w-xl text-sm text-slate-400">{description}</p>
+      <p className="mt-3 max-w-xl text-sm leading-7 text-slate-400">{description}</p>
       {ctaHref && ctaLabel ? (
         <Link href={ctaHref} className="mt-5">
           <Button className="gap-2">
