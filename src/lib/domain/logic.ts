@@ -2,6 +2,7 @@ import { addMinutes, differenceInMinutes } from "date-fns";
 
 import { getDashboardBuckets, getReportChartBuckets, getReportWindow } from "@/lib/time";
 import type {
+  BillAdjustment,
   ClubSettings,
   CounterSale,
   DashboardActivityPoint,
@@ -42,9 +43,61 @@ export function getSessionOverlapMinutes(
   return Math.floor((overlapEnd - overlapStart) / 60000);
 }
 
-export function calculateGameCharge(session: TableSession, endIso = new Date().toISOString()) {
+export function calculateGameCharge(
+  session: TableSession,
+  endIso = new Date().toISOString(),
+  freeMinutes = 0,
+) {
   const durationMinutes = differenceInWholeMinutes(session.startedAt, session.endedAt ?? endIso);
-  return Math.round((session.hourlyRateSnapshot * durationMinutes) / 60);
+  const billableMinutes = Math.max(durationMinutes - freeMinutes, 0);
+  return Math.round((session.hourlyRateSnapshot * billableMinutes) / 60);
+}
+
+export function getSessionBillAdjustments(sessionId: string, billAdjustments: BillAdjustment[]) {
+  return billAdjustments.filter((adjustment) => adjustment.sessionId === sessionId);
+}
+
+export function summarizeBillAdjustments(adjustments: BillAdjustment[]) {
+  return adjustments.reduce(
+    (summary, adjustment) => {
+      if (adjustment.type === "free_minutes") {
+        summary.freeMinutes += adjustment.minutes ?? 0;
+        return summary;
+      }
+
+      const amount = adjustment.amount ?? 0;
+      if (adjustment.type === "manual_charge") {
+        summary.adjustmentAmount += amount;
+      } else {
+        summary.adjustmentAmount -= amount;
+      }
+      return summary;
+    },
+    { adjustmentAmount: 0, freeMinutes: 0 },
+  );
+}
+
+export function calculateSessionSummary(
+  session: TableSession,
+  orderTotal: number,
+  adjustments: BillAdjustment[],
+  endIso = new Date().toISOString(),
+) {
+  const durationMinutes = differenceInWholeMinutes(session.startedAt, session.endedAt ?? endIso);
+  const { adjustmentAmount, freeMinutes } = summarizeBillAdjustments(adjustments);
+  const baseGameCharge = calculateGameCharge(session, endIso, 0);
+  const gameCharge = calculateGameCharge(session, endIso, freeMinutes);
+  const rawTotal = gameCharge + orderTotal + adjustmentAmount;
+
+  return {
+    baseGameCharge,
+    gameCharge,
+    orderTotal,
+    adjustmentAmount,
+    total: Math.max(rawTotal, 0),
+    durationMinutes,
+    freeMinutes,
+  };
 }
 
 export function calculateOrderItemsTotal(items: Array<{ quantity: number; unitPrice: number }>) {
@@ -133,6 +186,7 @@ export function buildDashboardActivity({
   sessions,
   orders,
   orderItems,
+  billAdjustments,
   now,
 }: {
   settings: ClubSettings;
@@ -140,6 +194,7 @@ export function buildDashboardActivity({
   sessions: TableSession[];
   orders: Order[];
   orderItems: OrderItem[];
+  billAdjustments: BillAdjustment[];
   now?: Date;
 }): DashboardActivityPoint[] {
   const buckets = getDashboardBuckets(settings.timezone, now);
@@ -165,7 +220,10 @@ export function buildDashboardActivity({
           new Date(session.endedAt).getTime() >= bucket.start.getTime() &&
           new Date(session.endedAt).getTime() < bucket.endExclusive.getTime(),
       )
-      .reduce((sum, session) => sum + calculateGameCharge(session), 0);
+      .reduce((sum, session) => {
+        const sessionAdjustments = getSessionBillAdjustments(session.id, billAdjustments);
+        return sum + calculateSessionSummary(session, 0, sessionAdjustments, session.endedAt).gameCharge + summarizeBillAdjustments(sessionAdjustments).adjustmentAmount;
+      }, 0);
     const paidOrders = orders.filter((order) => {
       const stamp = order.paidAt ?? order.createdAt;
       return (
@@ -202,6 +260,7 @@ export function buildReport({
   orders,
   orderItems,
   products,
+  billAdjustments,
 }: {
   range: ReportRange;
   settings: ClubSettings;
@@ -211,6 +270,7 @@ export function buildReport({
   orders: Order[];
   orderItems: OrderItem[];
   products: Product[];
+  billAdjustments: BillAdjustment[];
 }): RangeReport {
   const clock = now ?? new Date();
   const window = getReportWindow(range, settings.timezone, clock);
@@ -235,7 +295,21 @@ export function buildReport({
   const relevantOrderIds = new Set(relevantOrders.map((order) => order.id));
   const relevantItems = orderItems.filter((item) => relevantOrderIds.has(item.orderId));
 
-  const gameRevenue = relevantSessions.reduce((sum, session) => sum + calculateGameCharge(session), 0);
+  const adjustmentsTotal = relevantSessions.reduce(
+    (sum, session) => sum + summarizeBillAdjustments(getSessionBillAdjustments(session.id, billAdjustments)).adjustmentAmount,
+    0,
+  );
+  const gameRevenue = relevantSessions.reduce(
+    (sum, session) =>
+      sum +
+      calculateSessionSummary(
+        session,
+        0,
+        getSessionBillAdjustments(session.id, billAdjustments),
+        session.endedAt,
+      ).gameCharge,
+    0,
+  );
   const barRevenue = calculateOrderItemsTotal(relevantItems);
   const playMinutes = sessions.reduce(
     (sum, session) =>
@@ -254,7 +328,19 @@ export function buildReport({
       return {
         tableId: table.id,
         tableName: table.name,
-        revenue: tableSessions.reduce((sum, session) => sum + calculateGameCharge(session), 0),
+        revenue: tableSessions.reduce((sum, session) => {
+          const summary = calculateSessionSummary(
+            session,
+            calculateOrderItemsTotal(
+              relevantItems.filter((item) =>
+                relevantOrders.some((order) => order.id === item.orderId && order.sessionId === session.id),
+              ),
+            ),
+            getSessionBillAdjustments(session.id, billAdjustments),
+            session.endedAt,
+          );
+          return sum + summary.total;
+        }, 0),
         minutes: tableSessions.reduce(
           (sum, session) => sum + differenceInWholeMinutes(session.startedAt, session.endedAt!),
           0,
@@ -294,8 +380,29 @@ export function buildReport({
     });
     const bucketOrderIds = new Set(bucketOrders.map((order) => order.id));
     const revenue =
-      bucketSessions.reduce((sum, session) => sum + calculateGameCharge(session), 0) +
-      calculateOrderItemsTotal(orderItems.filter((item) => bucketOrderIds.has(item.orderId)));
+      bucketSessions.reduce((sum, session) => {
+        const bucketItems = orderItems.filter((item) => bucketOrderIds.has(item.orderId));
+        const sessionOrderIds = new Set(
+          bucketOrders.filter((order) => order.sessionId === session.id).map((order) => order.id),
+        );
+        const sessionOrderTotal = calculateOrderItemsTotal(
+          bucketItems.filter((item) => sessionOrderIds.has(item.orderId)),
+        );
+        const summary = calculateSessionSummary(
+          session,
+          sessionOrderTotal,
+          getSessionBillAdjustments(session.id, billAdjustments),
+          session.endedAt,
+        );
+        return sum + summary.total;
+      }, 0) +
+      calculateOrderItemsTotal(
+        orderItems.filter(
+          (item) =>
+            bucketOrderIds.has(item.orderId) &&
+            !bucketOrders.some((order) => order.id === item.orderId && order.sessionId),
+        ),
+      );
     const occupiedMinutes = sessions.reduce(
       (sum, session) =>
         sum + getSessionOverlapMinutes(session, bucket.start, bucket.endExclusive, clock.toISOString()),
@@ -316,9 +423,10 @@ export function buildReport({
   return {
     range,
     label: window.label,
-    revenue: gameRevenue + barRevenue,
+    revenue: gameRevenue + barRevenue + adjustmentsTotal,
     gameRevenue,
     barRevenue,
+    adjustmentsTotal,
     sessionsCount: relevantSessions.length,
     occupancyRate,
     playMinutes,

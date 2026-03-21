@@ -28,6 +28,19 @@ export const reservationStatusEnum = pgEnum("reservation_status", [
 export const orderModeEnum = pgEnum("order_mode", ["table", "counter"]);
 export const orderStatusEnum = pgEnum("order_status", ["confirmed", "paid", "cancelled"]);
 export const stockMovementTypeEnum = pgEnum("stock_movement_type", ["in", "out", "correction"]);
+export const cashMovementTypeEnum = pgEnum("cash_movement_type", [
+  "service_in",
+  "service_out",
+  "expense",
+  "cash_drop",
+  "change",
+]);
+export const billAdjustmentTypeEnum = pgEnum("bill_adjustment_type", [
+  "discount",
+  "compliment",
+  "free_minutes",
+  "manual_charge",
+]);
 
 export const operators = pgTable("operators", {
   id: text("id").primaryKey(),
@@ -162,6 +175,28 @@ export const stockMovements = pgTable("stock_movements", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const cashMovements = pgTable("cash_movements", {
+  id: text("id").primaryKey(),
+  operatorId: text("operator_id").references(() => operators.id, { onDelete: "set null" }),
+  type: cashMovementTypeEnum("type").notNull(),
+  amount: integer("amount").notNull(),
+  reason: text("reason").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const billAdjustments = pgTable("bill_adjustments", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id")
+    .notNull()
+    .references(() => tableSessions.id, { onDelete: "cascade" }),
+  operatorId: text("operator_id").references(() => operators.id, { onDelete: "set null" }),
+  type: billAdjustmentTypeEnum("type").notNull(),
+  amount: integer("amount"),
+  minutes: integer("minutes"),
+  reason: text("reason").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const billiardTablesRelations = relations(billiardTables, ({ many }) => ({
   sessions: many(tableSessions),
   reservations: many(reservations),
@@ -176,6 +211,7 @@ export const tableSessionsRelations = relations(tableSessions, ({ one, many }) =
   reservationLinks: many(reservations),
   orders: many(orders),
   stockMovements: many(stockMovements),
+  billAdjustments: many(billAdjustments),
 }));
 
 export const reservationsRelations = relations(reservations, ({ one }) => ({
@@ -200,6 +236,11 @@ export const productsRelations = relations(products, ({ one, many }) => ({
   }),
   orderItems: many(orderItems),
   stockMovements: many(stockMovements),
+}));
+
+export const operatorsRelations = relations(operators, ({ many }) => ({
+  cashMovements: many(cashMovements),
+  billAdjustments: many(billAdjustments),
 }));
 
 export const ordersRelations = relations(orders, ({ one, many }) => ({
@@ -238,5 +279,23 @@ export const stockMovementsRelations = relations(stockMovements, ({ one }) => ({
   session: one(tableSessions, {
     fields: [stockMovements.sessionId],
     references: [tableSessions.id],
+  }),
+}));
+
+export const cashMovementsRelations = relations(cashMovements, ({ one }) => ({
+  operator: one(operators, {
+    fields: [cashMovements.operatorId],
+    references: [operators.id],
+  }),
+}));
+
+export const billAdjustmentsRelations = relations(billAdjustments, ({ one }) => ({
+  session: one(tableSessions, {
+    fields: [billAdjustments.sessionId],
+    references: [tableSessions.id],
+  }),
+  operator: one(operators, {
+    fields: [billAdjustments.operatorId],
+    references: [operators.id],
   }),
 }));

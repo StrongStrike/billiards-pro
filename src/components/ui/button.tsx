@@ -7,7 +7,7 @@ type ButtonSize = "sm" | "md" | "lg" | "icon";
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary:
-    "border border-cyan-300/30 bg-[linear-gradient(135deg,rgba(39,230,245,0.4),rgba(45,255,138,0.22))] text-white shadow-[0_18px_44px_rgba(15,80,95,0.26),inset_0_1px_0_rgba(255,255,255,0.12)] hover:border-cyan-200/60 hover:shadow-[0_22px_48px_rgba(18,118,136,0.34),inset_0_1px_0_rgba(255,255,255,0.16)]",
+    "border border-cyan-300/30 bg-[linear-gradient(135deg,rgba(39,230,245,0.34),rgba(45,255,138,0.18))] text-white shadow-[0_10px_24px_rgba(15,80,95,0.18),inset_0_1px_0_rgba(255,255,255,0.08)] hover:border-cyan-200/55 hover:brightness-105",
   secondary:
     "border border-white/10 bg-white/[0.05] text-slate-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] hover:border-white/18 hover:bg-white/[0.09]",
   ghost:
@@ -37,7 +37,7 @@ export function Button({
     <button
       type={type}
       className={cn(
-        "relative inline-flex items-center justify-center gap-2 overflow-hidden font-semibold tracking-[0.01em] transition duration-200 ease-out hover:-translate-y-0.5 active:translate-y-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#07111B] disabled:cursor-not-allowed disabled:translate-y-0 disabled:opacity-50",
+        "relative inline-flex items-center justify-center gap-2 overflow-hidden font-semibold tracking-[0.01em] transition duration-150 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-200/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#07111B] disabled:cursor-not-allowed disabled:opacity-50",
         "before:pointer-events-none before:absolute before:inset-x-4 before:top-0 before:h-px before:bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.45),transparent)] before:content-['']",
         variantClasses[variant],
         sizeClasses[size],

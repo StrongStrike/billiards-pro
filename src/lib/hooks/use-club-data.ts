@@ -9,7 +9,9 @@ export function useBootstrapQuery() {
   return useQuery({
     queryKey: ["bootstrap"],
     queryFn: () => requestJson<BootstrapPayload>("/api/bootstrap"),
-    refetchInterval: 15_000,
+    staleTime: 20_000,
+    gcTime: 5 * 60_000,
+    refetchInterval: 30_000,
   });
 }
 
@@ -17,7 +19,9 @@ export function useDashboardActivityQuery() {
   return useQuery({
     queryKey: ["dashboard", "activity"],
     queryFn: () => requestJson<DashboardActivityPoint[]>("/api/dashboard/activity"),
-    refetchInterval: 20_000,
+    staleTime: 20_000,
+    gcTime: 5 * 60_000,
+    refetchInterval: 30_000,
   });
 }
 
@@ -25,5 +29,7 @@ export function useReportsQuery(range: ReportRange) {
   return useQuery({
     queryKey: ["reports", range],
     queryFn: () => requestJson<RangeReport>(`/api/reports?range=${range}`),
+    staleTime: 60_000,
+    gcTime: 10 * 60_000,
   });
 }

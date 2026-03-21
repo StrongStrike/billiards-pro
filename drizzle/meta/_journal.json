@@ -15,6 +15,20 @@
       "when": 1773437042312,
       "tag": "0001_cpanel_operator_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1774046878002,
+      "tag": "0002_cash_movements",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1774109795012,
+      "tag": "0003_bill_adjustments",
+      "breakpoints": true
     }
   ]
 }

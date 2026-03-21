@@ -12,7 +12,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const value = searchParams.get("range");
   const range: ReportRange =
-    value === "month" || value === "year" || value === "day" ? value : "day";
+    value === "month" || value === "year" || value === "day" || value === "week" ? value : "day";
 
   return ok(await getReport(range));
 }

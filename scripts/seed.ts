@@ -3,7 +3,9 @@ import "dotenv/config";
 import { hashPassword } from "@/lib/auth/password";
 import { requireDatabase } from "@/lib/db/client";
 import {
+  billAdjustments,
   billiardTables,
+  cashMovements,
   clubSettings,
   operators,
   orderItems,
@@ -30,6 +32,8 @@ async function seedDatabase() {
 
   await db.transaction(async (tx) => {
     await tx.delete(operators);
+    await tx.delete(billAdjustments);
+    await tx.delete(cashMovements);
     await tx.delete(stockMovements);
     await tx.delete(orderItems);
     await tx.delete(orders);
@@ -142,6 +146,24 @@ async function seedDatabase() {
         orderId: null,
         sessionId: null,
         createdAt: new Date(movement.createdAt),
+      })),
+    );
+
+    await tx.insert(cashMovements).values(
+      dataset.cashMovements.map((movement) => ({
+        ...movement,
+        operatorId: "operator-admin",
+        createdAt: new Date(movement.createdAt),
+      })),
+    );
+
+    await tx.insert(billAdjustments).values(
+      dataset.billAdjustments.map((adjustment) => ({
+        ...adjustment,
+        operatorId: "operator-admin",
+        amount: adjustment.amount ?? null,
+        minutes: adjustment.minutes ?? null,
+        createdAt: new Date(adjustment.createdAt),
       })),
     );
   });

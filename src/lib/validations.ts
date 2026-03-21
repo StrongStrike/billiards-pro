@@ -32,6 +32,41 @@ export const counterSaleSchema = z.object({
   items: z.array(lineItemSchema).min(1),
 });
 
+export const cashMovementSchema = z.object({
+  type: z.enum(["service_in", "service_out", "expense", "cash_drop", "change"]),
+  amount: z.number().int().positive(),
+  reason: z.string().trim().min(4).max(180),
+});
+
+export const billAdjustmentSchema = z
+  .object({
+    sessionId: z.string().min(1),
+    type: z.enum(["discount", "compliment", "free_minutes", "manual_charge"]),
+    amount: z.number().int().positive().optional(),
+    minutes: z.number().int().positive().max(240).optional(),
+    reason: z.string().trim().min(4).max(180),
+  })
+  .superRefine((value, context) => {
+    if (value.type === "free_minutes") {
+      if (!value.minutes) {
+        context.addIssue({
+          code: "custom",
+          path: ["minutes"],
+          message: "Bepul daqiqa miqdorini kiriting",
+        });
+      }
+      return;
+    }
+
+    if (!value.amount) {
+      context.addIssue({
+        code: "custom",
+        path: ["amount"],
+        message: "Summani kiriting",
+      });
+    }
+  });
+
 export const reservationSchema = z
   .object({
     tableId: z.string().min(1),

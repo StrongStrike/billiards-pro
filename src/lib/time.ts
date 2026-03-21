@@ -4,10 +4,12 @@ import {
   addMonths,
   differenceInMinutes,
   endOfMonth,
+  endOfWeek,
   endOfYear,
   startOfDay,
   startOfHour,
   startOfMonth,
+  startOfWeek,
   startOfYear,
 } from "date-fns";
 import { formatInTimeZone, fromZonedTime, toZonedTime } from "date-fns-tz";
@@ -50,6 +52,20 @@ export function getReportWindow(range: ReportRange, timeZone: string, now = new 
     return {
       range,
       label: "Oylik hisobot",
+      start: fromZonedTime(zonedStart, zone),
+      endExclusive: fromZonedTime(zonedEndExclusive, zone),
+      zonedStart,
+      zonedEndExclusive,
+      timezone: zone,
+    };
+  }
+
+  if (range === "week") {
+    const zonedStart = startOfWeek(zonedNow, { weekStartsOn: 1 });
+    const zonedEndExclusive = addDays(endOfWeek(zonedNow, { weekStartsOn: 1 }), 1);
+    return {
+      range,
+      label: "Haftalik hisobot",
       start: fromZonedTime(zonedStart, zone),
       endExclusive: fromZonedTime(zonedEndExclusive, zone),
       zonedStart,
@@ -121,6 +137,19 @@ export function getReportChartBuckets(range: ReportRange, timeZone: string, now 
   if (range === "month") {
     const totalDays = differenceInMinutes(window.zonedEndExclusive, window.zonedStart) / (24 * 60);
     return Array.from({ length: totalDays }, (_, index) => {
+      const zonedStart = addDays(window.zonedStart, index);
+      const zonedEndExclusive = addDays(zonedStart, 1);
+      return {
+        label: formatInTimeZone(fromZonedTime(zonedStart, timeZone), timeZone, "dd MMM"),
+        start: fromZonedTime(zonedStart, timeZone),
+        endExclusive: fromZonedTime(zonedEndExclusive, timeZone),
+        durationMinutes: 24 * 60,
+      };
+    });
+  }
+
+  if (range === "week") {
+    return Array.from({ length: 7 }, (_, index) => {
       const zonedStart = addDays(window.zonedStart, index);
       const zonedEndExclusive = addDays(zonedStart, 1);
       return {

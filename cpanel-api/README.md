@@ -18,6 +18,7 @@ Fayllarni `~/public_html/api` ichiga joylashtiring.
 - `PATCH /api/inventory`
 - `POST /api/orders`
 - `POST /api/counter-sales`
+- `POST /api/bill-adjustments`
 - `POST /api/reservations`
 - `PATCH /api/reservations/{id}`
 - `POST /api/tables/{id}/session/start`

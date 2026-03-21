@@ -2,7 +2,9 @@ import { addHours, differenceInMinutes } from "date-fns";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 
 import {
+  billAdjustments,
   billiardTables,
+  cashMovements,
   clubSettings,
   operators,
   orderItems,
@@ -19,17 +21,18 @@ import {
   buildCounterSales,
   buildDashboardActivity,
   buildReport,
-  calculateGameCharge,
+  calculateSessionSummary,
   calculateOrderItemsTotal,
   calculateOrderTotal,
-  differenceInWholeMinutes,
   getReservedStock,
   getSessionOverlapMinutes,
   hasReservationOverlap,
 } from "@/lib/domain/logic";
 import { getReportWindow, isSameZonedDay } from "@/lib/time";
 import type {
+  BillAdjustment,
   BootstrapPayload,
+  CashMovement,
   ClubSettings,
   DashboardActivityPoint,
   OperatorSession,
@@ -179,6 +182,30 @@ function mapStockMovementRow(row: typeof stockMovements.$inferSelect): StockMove
   };
 }
 
+function mapCashMovementRow(row: typeof cashMovements.$inferSelect): CashMovement {
+  return {
+    id: row.id,
+    type: row.type,
+    amount: row.amount,
+    reason: row.reason,
+    operatorId: row.operatorId ?? undefined,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function mapBillAdjustmentRow(row: typeof billAdjustments.$inferSelect): BillAdjustment {
+  return {
+    id: row.id,
+    sessionId: row.sessionId,
+    operatorId: row.operatorId ?? undefined,
+    type: row.type,
+    amount: row.amount ?? undefined,
+    minutes: row.minutes ?? undefined,
+    reason: row.reason,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
 async function loadClubDataset(db: Database = requireDatabase()) {
   const [
     settingsRows,
@@ -190,6 +217,8 @@ async function loadClubDataset(db: Database = requireDatabase()) {
     orderRows,
     orderItemRows,
     stockMovementRows,
+    cashMovementRows,
+    billAdjustmentRows,
   ] = await Promise.all([
     db.select().from(clubSettings).limit(1),
     db.select().from(billiardTables).orderBy(asc(billiardTables.position)),
@@ -200,6 +229,8 @@ async function loadClubDataset(db: Database = requireDatabase()) {
     db.select().from(orders).orderBy(desc(orders.createdAt)),
     db.select().from(orderItems).orderBy(asc(orderItems.createdAt)),
     db.select().from(stockMovements).orderBy(desc(stockMovements.createdAt)),
+    db.select().from(cashMovements).orderBy(desc(cashMovements.createdAt)),
+    db.select().from(billAdjustments).orderBy(desc(billAdjustments.createdAt)),
   ]);
 
   const settingsRow = settingsRows[0];
@@ -217,6 +248,8 @@ async function loadClubDataset(db: Database = requireDatabase()) {
     orders: orderRows.map(mapOrderRow),
     orderItems: orderItemRows.map(mapOrderItemRow),
     stockMovements: stockMovementRows.map(mapStockMovementRow),
+    cashMovements: cashMovementRows.map(mapCashMovementRow),
+    billAdjustments: billAdjustmentRows.map(mapBillAdjustmentRow),
   };
 }
 
@@ -264,6 +297,7 @@ function buildTableSnapshots(
   ordersList: Order[],
   orderItemsList: OrderItem[],
   settings: ClubSettings,
+  billAdjustmentsList: BillAdjustment[],
   now = new Date(),
 ): TableSnapshot[] {
   return tables
@@ -283,14 +317,13 @@ function buildTableSnapshots(
       const { pendingOrderTotal } = activeSession
         ? getPendingOrderSummary(activeSession.id, ordersList, orderItemsList)
         : { pendingOrderTotal: 0 };
-      const gameCharge = activeSession ? calculateGameCharge(activeSession, now.toISOString()) : 0;
       const currentSummary = activeSession
-        ? {
-            gameCharge,
-            orderTotal: pendingOrderTotal,
-            total: gameCharge + pendingOrderTotal,
-            durationMinutes: differenceInWholeMinutes(activeSession.startedAt, now.toISOString()),
-          }
+        ? calculateSessionSummary(
+            activeSession,
+            pendingOrderTotal,
+            billAdjustmentsList.filter((adjustment) => adjustment.sessionId === activeSession.id),
+            now.toISOString(),
+          )
         : null;
 
       return {
@@ -316,6 +349,8 @@ function buildDashboardKpis({
   reservationsList,
   ordersList,
   orderItemsList,
+  cashMovementsList,
+  billAdjustmentsList,
   now,
 }: {
   settings: ClubSettings;
@@ -324,6 +359,8 @@ function buildDashboardKpis({
   reservationsList: Reservation[];
   ordersList: Order[];
   orderItemsList: OrderItem[];
+  cashMovementsList: CashMovement[];
+  billAdjustmentsList: BillAdjustment[];
   now?: Date;
 }) {
   const clock = now ?? new Date();
@@ -345,9 +382,47 @@ function buildDashboardKpis({
   );
   const paidOrderIds = new Set(paidOrdersToday.map((order) => order.id));
   const paidItemsToday = orderItemsList.filter((item) => paidOrderIds.has(item.orderId));
+  const paidCounterOrdersToday = paidOrdersToday.filter((order) => order.mode === "counter");
+  const paidCounterOrderIds = new Set(paidCounterOrdersToday.map((order) => order.id));
+  const paidCounterItemsToday = orderItemsList.filter((item) => paidCounterOrderIds.has(item.orderId));
+  const cashAdjustmentsToday = cashMovementsList.filter((movement) =>
+    isSameZonedDay(movement.createdAt, clock, settings.timezone),
+  );
+  const cashAdjustmentNet = cashAdjustmentsToday.reduce((sum, movement) => {
+    const sign =
+      movement.type === "service_in" || movement.type === "change"
+        ? 1
+        : -1;
+    return sum + sign * movement.amount;
+  }, 0);
+  const counterCashRevenue = calculateOrderItemsTotal(paidCounterItemsToday);
+  const billAdjustmentsToday = billAdjustmentsList.filter((adjustment) =>
+    isSameZonedDay(adjustment.createdAt, clock, settings.timezone),
+  );
+  const completedSessionRevenue = completedSessionsToday.reduce((sum, session) => {
+    const sessionOrderIds = new Set(
+      paidOrdersToday.filter((order) => order.sessionId === session.id).map((order) => order.id),
+    );
+    const sessionOrderTotal = calculateOrderItemsTotal(
+      paidItemsToday.filter((item) => sessionOrderIds.has(item.orderId)),
+    );
+    return (
+      sum +
+      calculateSessionSummary(
+        session,
+        sessionOrderTotal,
+        billAdjustmentsList.filter((adjustment) => adjustment.sessionId === session.id),
+        session.endedAt,
+      ).total
+    );
+  }, 0);
   const totalRevenue =
-    completedSessionsToday.reduce((sum, session) => sum + calculateGameCharge(session), 0) +
-    calculateOrderItemsTotal(paidItemsToday);
+    completedSessionRevenue +
+    calculateOrderItemsTotal(
+      paidItemsToday.filter(
+        (item) => !paidOrdersToday.some((order) => order.id === item.orderId && order.sessionId),
+      ),
+    );
   const occupiedMinutes = sessions.reduce(
     (sum, session) =>
       sum +
@@ -369,6 +444,10 @@ function buildDashboardKpis({
     occupancyRate:
       totalAvailableMinutes > 0 ? Math.round((occupiedMinutes / totalAvailableMinutes) * 100) : 0,
     barRevenue: calculateOrderItemsTotal(paidItemsToday),
+    cashOnHand: counterCashRevenue + cashAdjustmentNet,
+    cashAdjustmentNet,
+    cashMovementsToday: cashAdjustmentsToday.length,
+    billAdjustmentsToday: billAdjustmentsToday.length,
   };
 }
 
@@ -442,6 +521,7 @@ export async function getBootstrapPayload(
     state.orders,
     state.orderItems,
     state.settings,
+    state.billAdjustments,
     now,
   );
   const kpis = buildDashboardKpis({
@@ -451,6 +531,8 @@ export async function getBootstrapPayload(
     reservationsList: state.reservations,
     ordersList: state.orders,
     orderItemsList: state.orderItems,
+    cashMovementsList: state.cashMovements,
+    billAdjustmentsList: state.billAdjustments,
     now,
   });
 
@@ -471,6 +553,8 @@ export async function getBootstrapPayload(
     orderItems: state.orderItems,
     counterSales: buildCounterSales(state.orders, state.orderItems),
     stockMovements: state.stockMovements,
+    cashMovements: state.cashMovements,
+    billAdjustments: state.billAdjustments,
     kpis,
     lowStockProducts: buildLowStockProducts(state.products, state.orders, state.orderItems),
     generatedAt: now.toISOString(),
@@ -485,6 +569,7 @@ export async function getDashboardActivity(): Promise<DashboardActivityPoint[]> 
     sessions: state.sessions,
     orders: state.orders,
     orderItems: state.orderItems,
+    billAdjustments: state.billAdjustments,
   });
 }
 
@@ -800,6 +885,56 @@ export async function createCounterSale(input: {
   });
 }
 
+export async function createCashMovement(input: {
+  type: CashMovement["type"];
+  amount: number;
+  reason: string;
+  operatorId?: string;
+}) {
+  const db = requireDatabase();
+
+  await db.insert(cashMovements).values({
+    id: createId("cash"),
+    type: input.type,
+    amount: input.amount,
+    reason: input.reason.trim(),
+    operatorId: input.operatorId ?? null,
+    createdAt: new Date(),
+  });
+}
+
+export async function createBillAdjustment(input: {
+  sessionId: string;
+  type: BillAdjustment["type"];
+  amount?: number;
+  minutes?: number;
+  reason: string;
+  operatorId?: string;
+}) {
+  const db = requireDatabase();
+
+  const [sessionRow] = await db
+    .select()
+    .from(tableSessions)
+    .where(and(eq(tableSessions.id, input.sessionId), eq(tableSessions.status, "active")))
+    .limit(1);
+
+  if (!sessionRow) {
+    throw new Error("Faol seans topilmadi");
+  }
+
+  await db.insert(billAdjustments).values({
+    id: createId("adjustment"),
+    sessionId: input.sessionId,
+    operatorId: input.operatorId ?? null,
+    type: input.type,
+    amount: input.amount ?? null,
+    minutes: input.minutes ?? null,
+    reason: input.reason.trim(),
+    createdAt: new Date(),
+  });
+}
+
 export async function createReservation(input: {
   tableId: string;
   customerName: string;
@@ -966,6 +1101,7 @@ export async function getReport(range: ReportRange): Promise<RangeReport> {
     orders: state.orders,
     orderItems: state.orderItems,
     products: state.products,
+    billAdjustments: state.billAdjustments,
   });
 }
 

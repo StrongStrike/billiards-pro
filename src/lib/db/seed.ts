@@ -1,6 +1,8 @@
 import { addHours, addMinutes, subDays, subHours, subMinutes } from "date-fns";
 
 import type {
+  BillAdjustment,
+  CashMovement,
   ClubSettings,
   Order,
   OrderItem,
@@ -22,6 +24,8 @@ export interface SeedDataset {
   orders: Order[];
   orderItems: OrderItem[];
   stockMovements: StockMovement[];
+  cashMovements: CashMovement[];
+  billAdjustments: BillAdjustment[];
 }
 
 export function createSeedDataset(now = new Date()): SeedDataset {
@@ -193,6 +197,49 @@ export function createSeedDataset(now = new Date()): SeedDataset {
     { id: "movement-9", productId: "product-nuts", type: "out", quantity: 1, reason: "Lobby guest counter savdosi", resultingStock: 9, createdAt: subHours(now, 2).toISOString() },
   ];
 
+  const cashMovements: CashMovement[] = [
+    {
+      id: "cash-1",
+      type: "service_in",
+      amount: 300000,
+      reason: "Smena boshida kassaga xizmat puli kiritildi",
+      createdAt: subHours(now, 10).toISOString(),
+    },
+    {
+      id: "cash-2",
+      type: "change",
+      amount: 120000,
+      reason: "Mayda pul uchun razmen qilindi",
+      createdAt: subHours(now, 5).toISOString(),
+    },
+    {
+      id: "cash-3",
+      type: "expense",
+      amount: 45000,
+      reason: "Tozalash vositalari uchun xizmat xarajati",
+      createdAt: subHours(now, 3).toISOString(),
+    },
+  ];
+
+  const billAdjustments: BillAdjustment[] = [
+    {
+      id: "adjustment-1",
+      sessionId: "session-1",
+      type: "free_minutes",
+      minutes: 15,
+      reason: "Klub komplimenti sifatida 15 daqiqa qo'shildi",
+      createdAt: subMinutes(now, 20).toISOString(),
+    },
+    {
+      id: "adjustment-2",
+      sessionId: "session-5",
+      type: "discount",
+      amount: 30000,
+      reason: "Turnir ishtirokchisi uchun kassir chegirmasi",
+      createdAt: subHours(now, 5).toISOString(),
+    },
+  ];
+
   return {
     settings,
     tables,
@@ -203,5 +250,7 @@ export function createSeedDataset(now = new Date()): SeedDataset {
     orders,
     orderItems,
     stockMovements,
+    cashMovements,
+    billAdjustments,
   };
 }

@@ -2,10 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, LogOut, ShieldCheck, Sparkles } from "lucide-react";
-import { motion } from "motion/react";
+import { Activity, LogOut, Sparkles } from "lucide-react";
 
-import { CosmicStage } from "@/components/cosmic-stage";
 import { LiveClock } from "@/components/live-clock";
 import { Button } from "@/components/ui/button";
 import { logoutRequest } from "@/lib/client/api";
@@ -35,12 +33,11 @@ export function AdminShell({
 
   return (
     <div className="min-h-screen px-4 py-4 md:px-6 xl:px-8">
-      <CosmicStage />
       <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-[1820px] flex-col gap-4 xl:flex-row">
         <aside className="glass-panel soft-ring hud-frame flex w-full flex-row gap-2 rounded-[34px] p-3 xl:sticky xl:top-4 xl:min-h-[calc(100vh-2rem)] xl:w-[300px] xl:flex-col xl:p-5">
           <div className="sheen-surface hidden rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.015))] p-5 xl:block">
             <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-[18px] bg-[linear-gradient(135deg,rgba(39,230,245,0.34),rgba(45,255,138,0.18))] text-white shadow-[0_12px_28px_rgba(10,97,112,0.24)]">
+              <div className="flex h-12 w-12 items-center justify-center rounded-[18px] bg-[linear-gradient(135deg,rgba(39,230,245,0.34),rgba(45,255,138,0.18))] text-white shadow-[0_8px_18px_rgba(10,97,112,0.18)]">
                 <Sparkles className="h-5 w-5" />
               </div>
               <div>
@@ -53,22 +50,11 @@ export function AdminShell({
             </div>
             <div className="lux-subtle mt-5 h-px w-full" />
             <div className="mt-5 grid gap-3">
-              <div className="rounded-[22px] border border-cyan-300/14 bg-cyan-300/8 px-4 py-3">
-                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-cyan-100/75">
-                  <ShieldCheck className="h-4 w-4" />
-                  Tizim holati
-                </div>
-                <div className="mt-2 font-semibold text-white">API onlayn, sessiya himoyalangan</div>
-              </div>
               <div className="rounded-[22px] border border-white/8 bg-white/[0.03] px-4 py-3">
                 <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Oxirgi yangilanish</div>
                 <div className="mt-2 font-medium text-white">{formatDateTimeLabel(generatedAt, timezone)}</div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-[22px] border border-white/8 bg-white/[0.03] px-4 py-3">
-                  <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Zona</div>
-                  <div className="mt-2 font-display text-lg font-semibold text-white">{timezone}</div>
-                </div>
+              <div className="grid gap-3">
                 <div className="rounded-[22px] border border-white/8 bg-white/[0.03] px-4 py-3">
                   <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Kirish</div>
                   <div className="mt-2 inline-flex items-center gap-2 font-medium text-white">
@@ -94,13 +80,7 @@ export function AdminShell({
                       : "border-white/6 bg-white/[0.025] text-slate-400 hover:border-white/10 hover:bg-white/[0.06] hover:text-white",
                   )}
                 >
-                  {active ? (
-                    <motion.span
-                      layoutId="nav-active-shell"
-                      className="absolute inset-0 rounded-[24px] bg-[linear-gradient(135deg,rgba(39,230,245,0.14),rgba(39,230,245,0.05))]"
-                      transition={{ type: "spring", stiffness: 280, damping: 26 }}
-                    />
-                  ) : null}
+                  {active ? <span className="absolute inset-0 rounded-[24px] bg-[linear-gradient(135deg,rgba(39,230,245,0.14),rgba(39,230,245,0.05))]" /> : null}
                   <span
                     className={cn(
                       "relative rounded-2xl p-2.5 transition",
@@ -140,18 +120,8 @@ export function AdminShell({
         </aside>
 
         <div className="flex min-w-0 flex-1 flex-col gap-4">
-          <motion.header
-            className="glass-panel soft-ring hud-frame relative overflow-hidden rounded-[34px] px-6 py-6"
-            initial={{ opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.48, ease: [0.22, 1, 0.36, 1] }}
-          >
+          <header className="glass-panel soft-ring hud-frame relative overflow-hidden rounded-[34px] px-6 py-6">
             <div className="pointer-events-none absolute inset-y-0 right-0 w-1/2 bg-[radial-gradient(circle_at_top_right,rgba(39,230,245,0.14),transparent_56%)]" />
-            <motion.div
-              className="pointer-events-none absolute -right-20 top-8 h-44 w-44 rounded-full bg-[radial-gradient(circle,rgba(39,230,245,0.22),transparent_72%)] blur-3xl"
-              animate={{ x: [0, -26, 0], y: [0, 18, 0], opacity: [0.24, 0.42, 0.24] }}
-              transition={{ duration: 12, repeat: Number.POSITIVE_INFINITY, ease: "easeInOut" }}
-            />
             <div className="pointer-events-none absolute inset-x-12 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(39,230,245,0.6),transparent)]" />
             <div className="relative flex flex-col justify-between gap-6 lg:flex-row lg:items-start">
               <div className="max-w-3xl">
@@ -180,7 +150,7 @@ export function AdminShell({
               </div>
               <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-start">
                 <LiveClock timezone={timezone} />
-                <div className="rounded-[30px] border border-white/8 bg-white/[0.04] px-5 py-4 shadow-[0_20px_40px_rgba(0,0,0,0.14)]">
+                <div className="rounded-[30px] border border-white/8 bg-white/[0.04] px-5 py-4 shadow-[0_12px_24px_rgba(0,0,0,0.12)]">
                   <div className="text-xs uppercase tracking-[0.24em] text-slate-500">Navbatchi operator</div>
                   <div className="mt-3 flex items-center gap-3">
                     <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[linear-gradient(135deg,rgba(39,230,245,0.35),rgba(45,255,138,0.22))] font-display text-lg font-bold text-white">
@@ -194,7 +164,7 @@ export function AdminShell({
                 </div>
               </div>
             </div>
-          </motion.header>
+          </header>
 
           <main className="min-w-0 flex-1">{children}</main>
         </div>

@@ -221,8 +221,14 @@ function api_session_overlap_minutes(array $session, DateTimeImmutable $start, D
 
 function api_calculate_game_charge(array $session, ?string $endIso = null): int
 {
+    return api_calculate_game_charge_with_free_minutes($session, $endIso, 0);
+}
+
+function api_calculate_game_charge_with_free_minutes(array $session, ?string $endIso = null, int $freeMinutes = 0): int
+{
     $durationMinutes = api_difference_minutes($session['startedAt'], $session['endedAt'] ?? ($endIso ?? gmdate(DATE_ATOM)));
-    return (int) round(($session['hourlyRateSnapshot'] * $durationMinutes) / 60);
+    $billableMinutes = max($durationMinutes - $freeMinutes, 0);
+    return (int) round(($session['hourlyRateSnapshot'] * $billableMinutes) / 60);
 }
 
 function api_calculate_order_items_total(array $items): int
@@ -331,5 +337,53 @@ function api_fetch_orders_and_items(PDO $pdo): array
     return [
         'orders' => array_map('api_map_order', api_fetch_all($pdo, 'select * from orders')),
         'orderItems' => array_map('api_map_order_item', api_fetch_all($pdo, 'select * from order_items')),
+    ];
+}
+
+function api_get_session_bill_adjustments(string $sessionId, array $billAdjustments): array
+{
+    return array_values(array_filter(
+        $billAdjustments,
+        static fn (array $adjustment): bool => $adjustment['sessionId'] === $sessionId
+    ));
+}
+
+function api_summarize_bill_adjustments(array $adjustments): array
+{
+    $summary = ['adjustmentAmount' => 0, 'freeMinutes' => 0];
+
+    foreach ($adjustments as $adjustment) {
+        if ($adjustment['type'] === 'free_minutes') {
+            $summary['freeMinutes'] += (int) ($adjustment['minutes'] ?? 0);
+            continue;
+        }
+
+        $amount = (int) ($adjustment['amount'] ?? 0);
+        if ($adjustment['type'] === 'manual_charge') {
+            $summary['adjustmentAmount'] += $amount;
+        } else {
+            $summary['adjustmentAmount'] -= $amount;
+        }
+    }
+
+    return $summary;
+}
+
+function api_calculate_session_summary(array $session, int $orderTotal, array $billAdjustments, ?string $endIso = null): array
+{
+    $durationMinutes = api_difference_minutes($session['startedAt'], $session['endedAt'] ?? ($endIso ?? gmdate(DATE_ATOM)));
+    $adjustmentSummary = api_summarize_bill_adjustments($billAdjustments);
+    $baseGameCharge = api_calculate_game_charge_with_free_minutes($session, $endIso, 0);
+    $gameCharge = api_calculate_game_charge_with_free_minutes($session, $endIso, (int) $adjustmentSummary['freeMinutes']);
+    $total = max($gameCharge + $orderTotal + (int) $adjustmentSummary['adjustmentAmount'], 0);
+
+    return [
+        'baseGameCharge' => $baseGameCharge,
+        'gameCharge' => $gameCharge,
+        'orderTotal' => $orderTotal,
+        'adjustmentAmount' => (int) $adjustmentSummary['adjustmentAmount'],
+        'total' => $total,
+        'durationMinutes' => $durationMinutes,
+        'freeMinutes' => (int) $adjustmentSummary['freeMinutes'],
     ];
 }

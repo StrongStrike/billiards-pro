@@ -125,6 +125,32 @@ function api_map_stock_movement(array $row): array
     ];
 }
 
+function api_map_cash_movement(array $row): array
+{
+    return [
+        'id' => $row['id'],
+        'type' => $row['type'],
+        'amount' => (int) $row['amount'],
+        'reason' => $row['reason'],
+        'operatorId' => $row['operator_id'] ?: null,
+        'createdAt' => api_iso($row['created_at']),
+    ];
+}
+
+function api_map_bill_adjustment(array $row): array
+{
+    return [
+        'id' => $row['id'],
+        'sessionId' => $row['session_id'],
+        'operatorId' => $row['operator_id'] ?: null,
+        'type' => $row['type'],
+        'amount' => $row['amount'] !== null ? (int) $row['amount'] : null,
+        'minutes' => $row['minutes'] !== null ? (int) $row['minutes'] : null,
+        'reason' => $row['reason'],
+        'createdAt' => api_iso($row['created_at']),
+    ];
+}
+
 function api_load_state(array $config): array
 {
     $pdo = api_pdo($config);
@@ -143,6 +169,8 @@ function api_load_state(array $config): array
         'orders' => array_map('api_map_order', api_fetch_all($pdo, 'select * from orders order by created_at desc')),
         'orderItems' => array_map('api_map_order_item', api_fetch_all($pdo, 'select * from order_items order by created_at asc')),
         'stockMovements' => array_map('api_map_stock_movement', api_fetch_all($pdo, 'select * from stock_movements order by created_at desc')),
+        'cashMovements' => array_map('api_map_cash_movement', api_fetch_all($pdo, 'select * from cash_movements order by created_at desc')),
+        'billAdjustments' => array_map('api_map_bill_adjustment', api_fetch_all($pdo, 'select * from bill_adjustments order by created_at desc')),
     ];
 }
 
@@ -234,13 +262,12 @@ function api_table_snapshots(array $state, ?DateTimeImmutable $now = null): arra
 
         $currentSummary = null;
         if ($activeSession) {
-            $gameCharge = api_calculate_game_charge($activeSession, $clock->format(DATE_ATOM));
-            $currentSummary = [
-                'gameCharge' => $gameCharge,
-                'orderTotal' => $pendingOrderTotal,
-                'total' => $gameCharge + $pendingOrderTotal,
-                'durationMinutes' => api_difference_minutes($activeSession['startedAt'], $clock->format(DATE_ATOM)),
-            ];
+            $currentSummary = api_calculate_session_summary(
+                $activeSession,
+                $pendingOrderTotal,
+                api_get_session_bill_adjustments($activeSession['id'], $state['billAdjustments']),
+                $clock->format(DATE_ATOM)
+            );
         }
 
         $snapshots[] = [
@@ -282,13 +309,63 @@ function api_dashboard_kpis(array $state, array $tableSnapshots, ?DateTimeImmuta
         $state['orderItems'],
         static fn (array $item): bool => in_array($item['orderId'], $paidOrderIds, true)
     ));
+    $paidCounterOrders = array_values(array_filter(
+        $paidOrders,
+        static fn (array $order): bool => $order['mode'] === 'counter'
+    ));
+    $paidCounterOrderIds = array_column($paidCounterOrders, 'id');
+    $paidCounterItems = array_values(array_filter(
+        $state['orderItems'],
+        static fn (array $item): bool => in_array($item['orderId'], $paidCounterOrderIds, true)
+    ));
+    $cashAdjustmentsToday = array_values(array_filter($state['cashMovements'], function (array $movement) use ($clock, $state): bool {
+        return api_is_same_zoned_day($movement['createdAt'], $clock, $state['settings']['timezone']);
+    }));
+    $billAdjustmentsToday = array_values(array_filter($state['billAdjustments'], function (array $adjustment) use ($clock, $state): bool {
+        return api_is_same_zoned_day($adjustment['createdAt'], $clock, $state['settings']['timezone']);
+    }));
+    $cashAdjustmentNet = 0;
+    foreach ($cashAdjustmentsToday as $movement) {
+        $sign = in_array($movement['type'], ['service_in', 'change'], true) ? 1 : -1;
+        $cashAdjustmentNet += $sign * (int) $movement['amount'];
+    }
+    $counterCashRevenue = api_calculate_order_items_total($paidCounterItems);
 
-    $totalRevenue = 0;
+    $sessionRevenue = 0;
     foreach ($completedSessions as $session) {
-        $totalRevenue += api_calculate_game_charge($session);
+        $sessionOrderIds = [];
+        foreach ($paidOrders as $order) {
+            if (($order['sessionId'] ?? null) === $session['id']) {
+                $sessionOrderIds[] = $order['id'];
+            }
+        }
+
+        $sessionItems = array_values(array_filter(
+            $paidItems,
+            static fn (array $item): bool => in_array($item['orderId'], $sessionOrderIds, true)
+        ));
+
+        $sessionRevenue += api_calculate_session_summary(
+            $session,
+            api_calculate_order_items_total($sessionItems),
+            api_get_session_bill_adjustments($session['id'], $state['billAdjustments']),
+            $session['endedAt']
+        )['total'];
     }
     $barRevenue = api_calculate_order_items_total($paidItems);
-    $totalRevenue += $barRevenue;
+    $counterOnlyRevenue = api_calculate_order_items_total(array_values(array_filter(
+        $paidItems,
+        function (array $item) use ($paidOrders): bool {
+            foreach ($paidOrders as $order) {
+                if ($order['id'] === $item['orderId']) {
+                    return empty($order['sessionId']);
+                }
+            }
+
+            return false;
+        }
+    )));
+    $totalRevenue = $sessionRevenue + $counterOnlyRevenue;
 
     $occupiedMinutes = 0;
     foreach ($state['sessions'] as $session) {
@@ -310,6 +387,10 @@ function api_dashboard_kpis(array $state, array $tableSnapshots, ?DateTimeImmuta
         'gamesToday' => count($completedSessions),
         'occupancyRate' => $totalAvailableMinutes > 0 ? (int) round(($occupiedMinutes / $totalAvailableMinutes) * 100) : 0,
         'barRevenue' => $barRevenue,
+        'cashOnHand' => $counterCashRevenue + $cashAdjustmentNet,
+        'cashAdjustmentNet' => $cashAdjustmentNet,
+        'cashMovementsToday' => count($cashAdjustmentsToday),
+        'billAdjustmentsToday' => count($billAdjustmentsToday),
     ];
 }
 
@@ -343,6 +424,8 @@ function api_get_bootstrap_payload(array $config, array $operator): array
         'orderItems' => $state['orderItems'],
         'counterSales' => api_build_counter_sales($state['orders'], $state['orderItems']),
         'stockMovements' => $state['stockMovements'],
+        'cashMovements' => $state['cashMovements'],
+        'billAdjustments' => $state['billAdjustments'],
         'kpis' => $kpis,
         'lowStockProducts' => api_low_stock_products($state),
         'generatedAt' => $now->format(DATE_ATOM),

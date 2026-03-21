@@ -1,8 +1,8 @@
 "use client";
 
+import { memo } from "react";
 import Link from "next/link";
 import { ArrowRight, Clock3, Dot, ReceiptText, Sparkles, UserRound } from "lucide-react";
-import { motion } from "motion/react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { tableStatusCopy } from "@/lib/constants";
 import { cn, formatClock, formatCurrency, formatDuration } from "@/lib/utils";
 import type { TableSnapshot } from "@/types/club";
 
-export function SectionHeader({
+function SectionHeaderComponent({
   eyebrow,
   title,
   description,
@@ -42,7 +42,9 @@ export function SectionHeader({
   );
 }
 
-export function MetricCard({
+export const SectionHeader = memo(SectionHeaderComponent);
+
+function MetricCardComponent({
   label,
   value,
   accent = "cyan",
@@ -82,7 +84,7 @@ export function MetricCard({
 
   return (
     <Reveal>
-      <motion.div whileHover={{ y: -4, scale: 1.01 }} transition={{ duration: 0.22 }}>
+      <div>
         <Panel
           className={cn(
             "surface-accent sheen-surface relative overflow-hidden bg-gradient-to-br p-5 md:p-6",
@@ -91,7 +93,6 @@ export function MetricCard({
           )}
           tone={accent === "green" ? "green" : accent === "amber" ? "amber" : accent === "slate" ? "slate" : "cyan"}
         >
-          <div className="pointer-events-none absolute right-0 top-0 h-28 w-28 rounded-full bg-[radial-gradient(circle,rgba(255,255,255,0.12),transparent_70%)] blur-2xl opacity-60" />
           <div className="pointer-events-none absolute inset-x-6 bottom-0 h-px bg-[linear-gradient(90deg,rgba(255,255,255,0.08),transparent)]" />
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-3">
@@ -113,12 +114,14 @@ export function MetricCard({
           <div className="mt-4 h-px w-full bg-[linear-gradient(90deg,rgba(255,255,255,0.08),transparent)]" />
           <div className="mt-3 text-xs uppercase tracking-[0.22em] text-slate-500">Operatsion snapshot</div>
         </Panel>
-      </motion.div>
+      </div>
     </Reveal>
   );
 }
 
-export function TableCard({
+export const MetricCard = memo(MetricCardComponent);
+
+function TableCardComponent({
   table,
   currency,
   timezone,
@@ -130,7 +133,7 @@ export function TableCard({
   currency: string;
   timezone: string;
   compact?: boolean;
-  onSelect?: () => void;
+  onSelect?: (tableId: string) => void;
   selected?: boolean;
 }) {
   const status = tableStatusCopy[table.status];
@@ -142,17 +145,15 @@ export function TableCard({
         : "from-white/8 via-white/4";
 
   return (
-    <motion.button
+    <button
       type="button"
-      onClick={onSelect}
-      whileHover={{ y: -6, scale: 1.01 }}
-      transition={{ duration: 0.22 }}
+      onClick={() => onSelect?.(table.id)}
       className={cn(
         "glass-panel sheen-surface group relative w-full overflow-hidden rounded-[32px] p-4 text-left transition duration-200 hover:border-white/14",
         compact ? "min-h-[250px]" : "min-h-[300px]",
         selected
-          ? "border-cyan-300/40 shadow-[0_0_46px_rgba(39,230,245,0.16)]"
-          : "border-white/8 shadow-[0_18px_44px_rgba(0,0,0,0.18)]",
+          ? "border-cyan-300/40 shadow-[0_0_22px_rgba(39,230,245,0.12)]"
+          : "border-white/8 shadow-[0_10px_24px_rgba(0,0,0,0.16)]",
       )}
     >
       <div className={cn("pointer-events-none absolute inset-0 bg-gradient-to-br opacity-80", statusAccent, "to-transparent")} />
@@ -177,7 +178,7 @@ export function TableCard({
           <TableIllustration
             accentColor={table.accentColor}
             dimmed={table.status === "free"}
-            className="transition duration-300 group-hover:scale-[1.035] group-hover:-translate-y-1"
+            className="transition-transform duration-150"
           />
         </div>
 
@@ -232,11 +233,13 @@ export function TableCard({
           </div>
         </div>
       </div>
-    </motion.button>
+    </button>
   );
 }
 
-export function EmptyState({
+export const TableCard = memo(TableCardComponent);
+
+function EmptyStateComponent({
   title,
   description,
   ctaHref,
@@ -265,3 +268,5 @@ export function EmptyState({
     </Panel>
   );
 }
+
+export const EmptyState = memo(EmptyStateComponent);

@@ -5,7 +5,9 @@ export type ReservationStatus = "scheduled" | "arrived" | "completed" | "cancell
 export type OrderMode = "table" | "counter";
 export type OrderStatus = "confirmed" | "paid" | "cancelled";
 export type StockMovementType = "in" | "out" | "correction";
-export type ReportRange = "day" | "month" | "year";
+export type CashMovementType = "service_in" | "service_out" | "expense" | "cash_drop" | "change";
+export type BillAdjustmentType = "discount" | "compliment" | "free_minutes" | "manual_charge";
+export type ReportRange = "day" | "week" | "month" | "year";
 
 export interface Table {
   id: string;
@@ -99,6 +101,26 @@ export interface StockMovement {
   createdAt: string;
 }
 
+export interface CashMovement {
+  id: string;
+  type: CashMovementType;
+  amount: number;
+  reason: string;
+  operatorId?: string;
+  createdAt: string;
+}
+
+export interface BillAdjustment {
+  id: string;
+  sessionId: string;
+  operatorId?: string;
+  type: BillAdjustmentType;
+  amount?: number;
+  minutes?: number;
+  reason: string;
+  createdAt: string;
+}
+
 export interface ClubSettings {
   clubName: string;
   currency: string;
@@ -112,10 +134,13 @@ export interface ClubSettings {
 }
 
 export interface SessionSummary {
+  baseGameCharge: number;
   gameCharge: number;
   orderTotal: number;
+  adjustmentAmount: number;
   total: number;
   durationMinutes: number;
+  freeMinutes: number;
 }
 
 export interface TableSnapshot {
@@ -139,6 +164,10 @@ export interface DashboardKpis {
   gamesToday: number;
   occupancyRate: number;
   barRevenue: number;
+  cashOnHand: number;
+  cashAdjustmentNet: number;
+  cashMovementsToday: number;
+  billAdjustmentsToday: number;
 }
 
 export interface DashboardActivityPoint {
@@ -165,6 +194,8 @@ export interface BootstrapPayload {
   orderItems: OrderItem[];
   counterSales: CounterSale[];
   stockMovements: StockMovement[];
+  cashMovements: CashMovement[];
+  billAdjustments: BillAdjustment[];
   kpis: DashboardKpis;
   lowStockProducts: Product[];
   generatedAt: string;
@@ -176,6 +207,7 @@ export interface RangeReport {
   revenue: number;
   gameRevenue: number;
   barRevenue: number;
+  adjustmentsTotal: number;
   sessionsCount: number;
   occupancyRate: number;
   playMinutes: number;

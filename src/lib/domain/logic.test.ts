@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDashboardActivity,
   buildReport,
+  calculateSessionSummary,
   calculateGameCharge,
   getReservedStock,
   hasReservationOverlap,
@@ -74,6 +75,7 @@ describe("club domain logic", () => {
       orders: state.orders,
       orderItems: state.orderItems,
       products: state.products,
+      billAdjustments: state.billAdjustments,
     });
 
     expect(report.revenue).toBeGreaterThan(0);
@@ -89,10 +91,28 @@ describe("club domain logic", () => {
       sessions: state.sessions,
       orders: state.orders,
       orderItems: state.orderItems,
+      billAdjustments: state.billAdjustments,
       now: new Date("2026-03-13T22:00:00.000Z"),
     });
 
     expect(chart).toHaveLength(6);
     expect(chart.some((point) => point.occupancy > 0)).toBe(true);
+  });
+
+  it("applies free minutes and discounts to session summary", () => {
+    const state = createSeedDataset(new Date("2026-03-13T22:00:00.000Z"));
+    const session = state.sessions.find((item) => item.id === "session-5");
+    expect(session).toBeTruthy();
+
+    const summary = calculateSessionSummary(
+      session!,
+      54000,
+      state.billAdjustments.filter((item) => item.sessionId === "session-5"),
+      session!.endedAt,
+    );
+
+    expect(summary.gameCharge).toBeGreaterThan(0);
+    expect(summary.adjustmentAmount).toBe(-30000);
+    expect(summary.total).toBe(summary.gameCharge + 54000 - 30000);
   });
 });

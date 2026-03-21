@@ -76,8 +76,8 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center px-4 py-8">
       <div className="grid w-full max-w-6xl gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <Panel className="relative overflow-hidden p-8 md:p-10">
-          <div className="absolute -left-12 top-12 h-40 w-40 rounded-full bg-cyan-300/15 blur-3xl" />
-          <div className="absolute right-0 top-1/3 h-52 w-52 rounded-full bg-emerald-300/10 blur-3xl" />
+          <div className="absolute -left-12 top-12 h-36 w-36 rounded-full bg-cyan-300/8" />
+          <div className="absolute right-0 top-1/3 h-44 w-44 rounded-full bg-emerald-300/6" />
           <div className="relative">
             <div className="inline-flex items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-4 py-2 text-xs uppercase tracking-[0.22em] text-cyan-200">
               <Sparkles className="h-4 w-4" />

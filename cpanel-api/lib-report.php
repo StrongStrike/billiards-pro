@@ -13,6 +13,21 @@ function api_get_report_window(string $range, string $timezone, ?DateTimeImmutab
     $zone = new DateTimeZone(api_timezone_name($timezone));
     $clock = ($now ?? new DateTimeImmutable('now', new DateTimeZone('UTC')))->setTimezone($zone);
 
+    if ($range === 'week') {
+        $weekday = (int) $clock->format('N');
+        $zonedStart = $clock->modify('-' . ($weekday - 1) . ' days')->setTime(0, 0);
+        $zonedEndExclusive = $zonedStart->modify('+7 days');
+        return [
+            'range' => $range,
+            'label' => 'Haftalik hisobot',
+            'timezone' => $zone->getName(),
+            'zonedStart' => $zonedStart,
+            'zonedEndExclusive' => $zonedEndExclusive,
+            'start' => $zonedStart->setTimezone(new DateTimeZone('UTC')),
+            'endExclusive' => $zonedEndExclusive->setTimezone(new DateTimeZone('UTC')),
+        ];
+    }
+
     if ($range === 'month') {
         $zonedStart = $clock->modify('first day of this month')->setTime(0, 0);
         $zonedEndExclusive = $zonedStart->modify('+1 month');
@@ -97,6 +112,20 @@ function api_get_report_chart_buckets(string $range, string $timezone, ?DateTime
         return $buckets;
     }
 
+    if ($range === 'week') {
+        for ($index = 0; $index < 7; $index++) {
+            $zonedStart = $window['zonedStart']->modify('+' . $index . ' day');
+            $zonedEndExclusive = $zonedStart->modify('+1 day');
+            $buckets[] = [
+                'label' => $zonedStart->format('d') . ' ' . api_month_label((int) $zonedStart->format('n')),
+                'start' => $zonedStart->setTimezone(new DateTimeZone('UTC')),
+                'endExclusive' => $zonedEndExclusive->setTimezone(new DateTimeZone('UTC')),
+                'durationMinutes' => 1440,
+            ];
+        }
+        return $buckets;
+    }
+
     if ($range === 'month') {
         $current = $window['zonedStart'];
         while ($current < $window['zonedEndExclusive']) {
@@ -159,7 +188,12 @@ function api_get_dashboard_activity(array $config): array
                 && api_parse_time($session['endedAt'])->getTimestamp() >= $bucket['start']->getTimestamp()
                 && api_parse_time($session['endedAt'])->getTimestamp() < $bucket['endExclusive']->getTimestamp()
             ) {
-                $completedSessionRevenue += api_calculate_game_charge($session);
+                $completedSessionRevenue += api_calculate_session_summary(
+                    $session,
+                    0,
+                    api_get_session_bill_adjustments($session['id'], $state['billAdjustments']),
+                    $session['endedAt']
+                )['gameCharge'] + api_summarize_bill_adjustments(api_get_session_bill_adjustments($session['id'], $state['billAdjustments']))['adjustmentAmount'];
             }
         }
 
@@ -217,9 +251,12 @@ function api_build_report(array $config, string $range): array
         static fn (array $item): bool => in_array($item['orderId'], $relevantOrderIds, true)
     ));
 
+    $adjustmentsTotal = 0;
     $gameRevenue = 0;
     foreach ($relevantSessions as $session) {
-        $gameRevenue += api_calculate_game_charge($session);
+        $sessionAdjustments = api_get_session_bill_adjustments($session['id'], $state['billAdjustments']);
+        $adjustmentsTotal += api_summarize_bill_adjustments($sessionAdjustments)['adjustmentAmount'];
+        $gameRevenue += api_calculate_session_summary($session, 0, $sessionAdjustments, $session['endedAt'])['gameCharge'];
     }
     $barRevenue = api_calculate_order_items_total($relevantItems);
 
@@ -241,7 +278,22 @@ function api_build_report(array $config, string $range): array
         $revenue = 0;
         $minutes = 0;
         foreach ($tableSessions as $session) {
-            $revenue += api_calculate_game_charge($session);
+            $sessionOrderIds = [];
+            foreach ($relevantOrders as $order) {
+                if (($order['sessionId'] ?? null) === $session['id']) {
+                    $sessionOrderIds[] = $order['id'];
+                }
+            }
+            $sessionItems = array_values(array_filter(
+                $relevantItems,
+                static fn (array $item): bool => in_array($item['orderId'], $sessionOrderIds, true)
+            ));
+            $revenue += api_calculate_session_summary(
+                $session,
+                api_calculate_order_items_total($sessionItems),
+                api_get_session_bill_adjustments($session['id'], $state['billAdjustments']),
+                $session['endedAt']
+            )['total'];
             $minutes += api_difference_minutes($session['startedAt'], (string) $session['endedAt']);
         }
         if ($revenue > 0 || $minutes > 0) {
@@ -301,11 +353,36 @@ function api_build_report(array $config, string $range): array
 
         $revenue = 0;
         foreach ($bucketSessions as $session) {
-            $revenue += api_calculate_game_charge($session);
+            $sessionOrderIds = [];
+            foreach ($bucketOrders as $order) {
+                if (($order['sessionId'] ?? null) === $session['id']) {
+                    $sessionOrderIds[] = $order['id'];
+                }
+            }
+            $sessionItems = array_values(array_filter(
+                $state['orderItems'],
+                static fn (array $item): bool => in_array($item['orderId'], $sessionOrderIds, true)
+            ));
+            $revenue += api_calculate_session_summary(
+                $session,
+                api_calculate_order_items_total($sessionItems),
+                api_get_session_bill_adjustments($session['id'], $state['billAdjustments']),
+                $session['endedAt']
+            )['total'];
         }
         $revenue += api_calculate_order_items_total(array_values(array_filter(
             $state['orderItems'],
-            static fn (array $item): bool => in_array($item['orderId'], $bucketOrderIds, true)
+            function (array $item) use ($bucketOrderIds, $bucketOrders): bool {
+                if (!in_array($item['orderId'], $bucketOrderIds, true)) {
+                    return false;
+                }
+                foreach ($bucketOrders as $order) {
+                    if ($order['id'] === $item['orderId']) {
+                        return empty($order['sessionId']);
+                    }
+                }
+                return false;
+            }
         )));
 
         $chart[] = [
@@ -321,9 +398,10 @@ function api_build_report(array $config, string $range): array
     return [
         'range' => $range,
         'label' => $window['label'],
-        'revenue' => $gameRevenue + $barRevenue,
+        'revenue' => $gameRevenue + $barRevenue + $adjustmentsTotal,
         'gameRevenue' => $gameRevenue,
         'barRevenue' => $barRevenue,
+        'adjustmentsTotal' => $adjustmentsTotal,
         'sessionsCount' => count($relevantSessions),
         'occupancyRate' => $occupancyRate,
         'playMinutes' => $playMinutes,

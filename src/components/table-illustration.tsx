@@ -12,7 +12,7 @@ export function TableIllustration({
   return (
     <svg
       viewBox="0 0 320 200"
-      className={cn("h-auto w-full drop-shadow-[0_20px_24px_rgba(0,0,0,0.45)]", className)}
+      className={cn("h-auto w-full drop-shadow-[0_10px_14px_rgba(0,0,0,0.3)]", className)}
       role="img"
       aria-label="Billiard table illustration"
     >

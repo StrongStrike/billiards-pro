@@ -399,6 +399,95 @@ function api_create_counter_sale(array $config, array $input): void
     }
 }
 
+function api_create_cash_movement(array $config, array $operator, array $input): void
+{
+    $type = (string) ($input['type'] ?? '');
+    $amount = (int) ($input['amount'] ?? 0);
+    $reason = trim((string) ($input['reason'] ?? ''));
+
+    if (!in_array($type, ['service_in', 'service_out', 'expense', 'cash_drop', 'change'], true)) {
+        throw new ApiException(400, "Kassa amali turi noto'g'ri");
+    }
+
+    if ($amount <= 0) {
+        throw new ApiException(400, "Summa musbat bo'lishi kerak");
+    }
+
+    if (mb_strlen($reason) < 4) {
+        throw new ApiException(400, "Izoh kamida 4 belgidan iborat bo'lishi kerak");
+    }
+
+    $pdo = api_pdo($config);
+    api_execute(
+        $pdo,
+        'insert into cash_movements (id, operator_id, type, amount, reason, created_at)
+         values (:id, :operator_id, :type, :amount, :reason, :created_at)',
+        [
+            'id' => api_create_id('cash'),
+            'operator_id' => $operator['id'] ?? null,
+            'type' => $type,
+            'amount' => $amount,
+            'reason' => $reason,
+            'created_at' => gmdate(DATE_ATOM),
+        ]
+    );
+}
+
+function api_create_bill_adjustment(array $config, array $operator, array $input): void
+{
+    $sessionId = (string) ($input['sessionId'] ?? '');
+    $type = (string) ($input['type'] ?? '');
+    $amount = array_key_exists('amount', $input) ? (int) $input['amount'] : null;
+    $minutes = array_key_exists('minutes', $input) ? (int) $input['minutes'] : null;
+    $reason = trim((string) ($input['reason'] ?? ''));
+
+    if ($sessionId === '') {
+        throw new ApiException(400, 'Seans topilmadi');
+    }
+
+    if (!in_array($type, ['discount', 'compliment', 'free_minutes', 'manual_charge'], true)) {
+        throw new ApiException(400, "Billing tuzatish turi noto'g'ri");
+    }
+
+    if ($type === 'free_minutes') {
+        if ($minutes === null || $minutes <= 0) {
+            throw new ApiException(400, "Bepul daqiqa miqdorini kiriting");
+        }
+    } elseif ($amount === null || $amount <= 0) {
+        throw new ApiException(400, "Summani kiriting");
+    }
+
+    if (mb_strlen($reason) < 4) {
+        throw new ApiException(400, "Izoh kamida 4 belgidan iborat bo'lishi kerak");
+    }
+
+    $pdo = api_pdo($config);
+    $sessionRow = api_fetch_one(
+        $pdo,
+        "select * from table_sessions where id = :id and status = 'active' limit 1",
+        ['id' => $sessionId]
+    );
+    if (!$sessionRow) {
+        throw new ApiException(400, 'Faol seans topilmadi');
+    }
+
+    api_execute(
+        $pdo,
+        'insert into bill_adjustments (id, session_id, operator_id, type, amount, minutes, reason, created_at)
+         values (:id, :session_id, :operator_id, :type, :amount, :minutes, :reason, :created_at)',
+        [
+            'id' => api_create_id('adjustment'),
+            'session_id' => $sessionId,
+            'operator_id' => $operator['id'] ?? null,
+            'type' => $type,
+            'amount' => $amount,
+            'minutes' => $minutes,
+            'reason' => $reason,
+            'created_at' => gmdate(DATE_ATOM),
+        ]
+    );
+}
+
 function api_create_reservation(array $config, array $input): void
 {
     $tableId = (string) ($input['tableId'] ?? '');

@@ -70,7 +70,7 @@ function api_run(): void
 
         if ($method === 'GET' && $route === '/reports') {
             $range = $_GET['range'] ?? 'day';
-            if (!in_array($range, ['day', 'month', 'year'], true)) {
+            if (!in_array($range, ['day', 'week', 'month', 'year'], true)) {
                 $range = 'day';
             }
             api_json_response(api_build_report($config, (string) $range));
@@ -111,6 +111,18 @@ function api_run(): void
 
         if ($method === 'POST' && $route === '/counter-sales') {
             api_create_counter_sale($config, api_request_json());
+            api_json_response(['ok' => true]);
+            return;
+        }
+
+        if ($method === 'POST' && $route === '/cash-movements') {
+            api_create_cash_movement($config, $operator, api_request_json());
+            api_json_response(['ok' => true]);
+            return;
+        }
+
+        if ($method === 'POST' && $route === '/bill-adjustments') {
+            api_create_bill_adjustment($config, $operator, api_request_json());
             api_json_response(['ok' => true]);
             return;
         }

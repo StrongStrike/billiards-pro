@@ -26,8 +26,7 @@ export function Panel({
         "glass-panel group relative overflow-hidden rounded-[32px] p-5 md:p-6",
         "before:pointer-events-none before:absolute before:inset-0 before:opacity-90 before:content-['']",
         "after:pointer-events-none after:absolute after:inset-x-6 after:top-0 after:h-px after:bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.28),transparent)] after:content-['']",
-        "shadow-[0_28px_70px_rgba(0,0,0,0.28)]",
-        "animate-surface-enter",
+        "shadow-[0_14px_34px_rgba(0,0,0,0.18)]",
         toneClasses[tone],
         className,
       )}
