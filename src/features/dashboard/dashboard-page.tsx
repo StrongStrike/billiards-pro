@@ -11,7 +11,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { Input, Textarea } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
 import { Select } from "@/components/ui/select";
-import { useModalDismiss, useToast } from "@/components/ui/modal-provider";
+import { ModalDismissButton, useToast } from "@/components/ui/modal-provider";
 import { ModalNote, ModalStat, ResponsiveModal } from "@/components/ui/responsive-modal";
 import { Reveal, Stagger, StaggerItem } from "@/components/ui/reveal";
 import { postJson } from "@/lib/client/api";
@@ -49,7 +49,6 @@ export function DashboardPage() {
   const bootstrapQuery = useBootstrapQuery();
   const activityQuery = useDashboardActivityQuery();
   const { pushToast } = useToast();
-  const requestTopLayerClose = useModalDismiss();
   const [cashModalOpen, setCashModalOpen] = useState(false);
   const [cashType, setCashType] = useState<CashMovement["type"]>("service_in");
   const [cashAmount, setCashAmount] = useState("");
@@ -564,9 +563,9 @@ export function DashboardPage() {
         ]}
         footer={
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <Button variant="secondary" onClick={requestTopLayerClose} disabled={cashPending}>
-              Yopish
-            </Button>
+              <ModalDismissButton variant="secondary" disabled={cashPending}>
+                Yopish
+              </ModalDismissButton>
             <Button className="gap-2" onClick={submitCashMovement} disabled={cashPending}>
               <HandCoins className="h-4 w-4" />
               {cashPending ? "Saqlanmoqda..." : "Harakatni saqlash"}

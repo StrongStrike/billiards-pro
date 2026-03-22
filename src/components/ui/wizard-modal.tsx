@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { useModalDismiss, type ModalCloseGuard } from "@/components/ui/modal-provider";
+import { ModalDismissButton, type ModalCloseGuard } from "@/components/ui/modal-provider";
 import { ResponsiveModal } from "@/components/ui/responsive-modal";
 
 type WizardModalProps = {
@@ -42,8 +42,6 @@ export function WizardModal({
   closeGuard,
   children,
 }: WizardModalProps) {
-  const requestTopLayerClose = useModalDismiss();
-
   return (
     <ResponsiveModal
       open={open}
@@ -90,9 +88,9 @@ export function WizardModal({
       }
       footer={
         <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
-          <Button variant="secondary" onClick={requestTopLayerClose} disabled={pending}>
+          <ModalDismissButton variant="secondary" disabled={pending}>
             Yopish
-          </Button>
+          </ModalDismissButton>
           <div className="flex flex-col-reverse gap-3 sm:flex-row">
             {onPrev ? (
               <Button variant="ghost" className="gap-2" onClick={onPrev} disabled={pending || !canGoPrev}>

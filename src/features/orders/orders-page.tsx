@@ -4,6 +4,7 @@ import { memo, useCallback, useMemo, useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   PackageSearch,
+  Printer,
   ReceiptText,
   ShoppingBasket,
   ShoppingCart,
@@ -12,26 +13,35 @@ import {
   WalletCards,
 } from "lucide-react";
 
+import { ReceiptPreview } from "@/components/print/receipt-preview";
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
 import { Panel } from "@/components/ui/panel";
-import { useModalDismiss, useToast } from "@/components/ui/modal-provider";
+import { ModalDismissButton, useToast } from "@/components/ui/modal-provider";
 import { ModalNote, ModalStat, ResponsiveModal } from "@/components/ui/responsive-modal";
 import { Reveal, Stagger, StaggerItem } from "@/components/ui/reveal";
 import { Select } from "@/components/ui/select";
 import { WizardModal } from "@/components/ui/wizard-modal";
 import { postJson } from "@/lib/client/api";
 import { useBootstrapQuery } from "@/lib/hooks/use-club-data";
+import { openPrintDocument } from "@/lib/print";
+import {
+  buildReceiptHtml,
+  createDocumentCode,
+  type PrintableReceipt,
+  type PrintableReceiptLine,
+} from "@/lib/receipts";
 import { formatCurrency, formatDateTimeLabel } from "@/lib/utils";
 import { EmptyState, MetricCard, SectionHeader } from "@/features/shared";
-import type { Product, ProductCategory, TableSnapshot } from "@/types/club";
+import type { CounterSale, OrderItem, Product, ProductCategory, TableSnapshot } from "@/types/club";
 
 type CartItem = { productId: string; quantity: number };
 type OrderStep = 0 | 1 | 2;
 
 const EMPTY_CATEGORIES: ProductCategory[] = [];
 const EMPTY_PRODUCTS: Product[] = [];
+const EMPTY_ORDER_ITEMS: OrderItem[] = [];
 
 const ProductCatalogSection = memo(function ProductCatalogSection({
   category,
@@ -168,8 +178,8 @@ export function OrdersPage() {
   const [productDrawerId, setProductDrawerId] = useState<string | null>(null);
   const [productDrawerQuantity, setProductDrawerQuantity] = useState("1");
   const [lowStockOpen, setLowStockOpen] = useState(false);
+  const [receiptPreview, setReceiptPreview] = useState<PrintableReceipt | null>(null);
   const [pending, startTransition] = useTransition();
-  const requestTopLayerClose = useModalDismiss();
 
   const activeTables = useMemo(
     () => bootstrapQuery.data?.tables.filter((table) => table.activeSession) ?? [],
@@ -237,6 +247,7 @@ export function OrdersPage() {
   const products = bootstrapQuery.data?.products ?? EMPTY_PRODUCTS;
   const settings = bootstrapQuery.data?.settings;
   const orders = bootstrapQuery.data?.orders ?? [];
+  const orderItems = bootstrapQuery.data?.orderItems ?? EMPTY_ORDER_ITEMS;
   const counterSales = bootstrapQuery.data?.counterSales ?? [];
   const lowStockProducts = bootstrapQuery.data?.lowStockProducts ?? [];
   const activeProductsCount = products.filter((product) => product.isActive).length;
@@ -258,6 +269,46 @@ export function OrdersPage() {
       return sum + (product?.price ?? 0) * item.quantity;
     }, 0);
   }, [products, cart]);
+
+  const cartLines = useMemo<PrintableReceiptLine[]>(
+    () =>
+      cart
+        .map((item) => {
+          const product = products.find((candidate) => candidate.id === item.productId);
+          if (!product) {
+            return null;
+          }
+
+          return {
+            name: product.name,
+            quantity: item.quantity,
+            unitPrice: product.price,
+            total: product.price * item.quantity,
+          };
+        })
+        .filter((item): item is PrintableReceiptLine => Boolean(item)),
+    [cart, products],
+  );
+
+  const orderLinesByOrderId = useMemo(() => {
+    const lines = new Map<string, PrintableReceiptLine[]>();
+    for (const item of orderItems) {
+      const product = products.find((candidate) => candidate.id === item.productId);
+      if (!product) {
+        continue;
+      }
+
+      const current = lines.get(item.orderId) ?? [];
+      current.push({
+        name: product.name,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        total: item.unitPrice * item.quantity,
+      });
+      lines.set(item.orderId, current);
+    }
+    return lines;
+  }, [orderItems, products]);
 
   const activeProductsByCategory = useMemo(
     () =>
@@ -300,6 +351,54 @@ export function OrdersPage() {
     setProductDrawerQuantity("1");
   }
 
+  function buildCounterReceipt(lines: PrintableReceiptLine[], issuedAt: string, sale?: CounterSale) {
+    if (!settings || !bootstrapQuery.data) {
+      throw new Error("Chek uchun klub ma'lumotlari hali tayyor emas");
+    }
+
+    return {
+      title: "Kassa cheki",
+      clubName: settings.clubName,
+      documentCode: createDocumentCode("SALE", sale?.id ?? issuedAt),
+      printedAt: issuedAt,
+      timezone: settings.timezone,
+      currency: settings.currency,
+      operatorName: bootstrapQuery.data.operator.name,
+      modeLabel: "Kassa savdosi",
+      customerName: sale?.customerName ?? (customerName.trim() || "Kassa mijozi"),
+      items: lines,
+      adjustments: [],
+      total: sale?.total ?? lines.reduce((sum, item) => sum + item.total, 0),
+      notes: ["Alohida kassadan yakunlangan savdo."],
+      footerNote: "Termal printer uchun mos 80mm chek.",
+    } satisfies PrintableReceipt;
+  }
+
+  function handlePrintReceipt(receipt: PrintableReceipt) {
+    try {
+      openPrintDocument({
+        title: receipt.documentCode,
+        bodyHtml: buildReceiptHtml(receipt),
+      });
+      pushToast({
+        title: "Chek chop etish ochildi",
+        description: "Brauzer print dialogi ishga tushirildi.",
+        tone: "success",
+      });
+    } catch (error) {
+      pushToast({
+        title: "Chek chiqarilmadi",
+        description: error instanceof Error ? error.message : "Print oynasini ochib bo'lmadi",
+        tone: "error",
+      });
+    }
+  }
+
+  function openRecentCounterReceipt(sale: CounterSale) {
+    const lines = orderLinesByOrderId.get(sale.orderId) ?? [];
+    setReceiptPreview(buildCounterReceipt(lines, sale.createdAt, sale));
+  }
+
   function handleBuilderNext() {
     if (builderStep === 0) {
       if (mode === "table" && !effectiveSelectedTableId) {
@@ -329,9 +428,15 @@ export function OrdersPage() {
 
     startTransition(async () => {
       try {
+        const issuedAt = new Date().toISOString();
+        const receiptDraft =
+          mode === "counter" ? buildCounterReceipt(cartLines, issuedAt) : null;
         await submitOrder();
         setBuilderOpen(false);
         setBuilderStep(0);
+        if (receiptDraft) {
+          setReceiptPreview(receiptDraft);
+        }
         pushToast({
           title: "Buyurtma saqlandi",
           description: mode === "table" ? "Order stol seansiga biriktirildi." : "Kassa savdosi yaratildi.",
@@ -517,15 +622,21 @@ export function OrdersPage() {
                 <div className="mt-5 space-y-3">
                   {counterSales.slice(0, 4).map((sale) => (
                     <div key={sale.id} className="rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-4">
                         <div>
                           <div className="font-semibold text-white">{sale.customerName ?? "Kassa mijozi"}</div>
                           <div className="mt-1 text-sm text-slate-400">
                             {formatDateTimeLabel(sale.createdAt, settings.timezone)}
                           </div>
                         </div>
-                        <div className="font-display text-2xl font-bold text-emerald-200">
-                          {formatCurrency(sale.total, settings.currency)}
+                        <div className="flex items-center gap-3">
+                          <Button variant="ghost" className="gap-2" onClick={() => openRecentCounterReceipt(sale)}>
+                            <Printer className="h-4 w-4" />
+                            Chek
+                          </Button>
+                          <div className="font-display text-2xl font-bold text-emerald-200">
+                            {formatCurrency(sale.total, settings.currency)}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -556,9 +667,9 @@ export function OrdersPage() {
         footer={
           selectedProduct ? (
             <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-              <Button variant="secondary" onClick={requestTopLayerClose}>
-                Yopish
-              </Button>
+                <ModalDismissButton variant="secondary">
+                  Yopish
+                </ModalDismissButton>
               <Button
                 className="gap-2"
                 onClick={() => {
@@ -702,6 +813,39 @@ export function OrdersPage() {
             )}
           </div>
         </div>
+      </ResponsiveModal>
+
+      <ResponsiveModal
+        open={Boolean(receiptPreview)}
+        onClose={() => setReceiptPreview(null)}
+        title="Chek preview"
+        description="Kassir shu oynada yakuniy chekni ko'rib, termal printerga chiqaradi yoki qayta chop etadi."
+        tone="green"
+        size="lg"
+        icon={<Printer className="h-5 w-5" />}
+        headerMeta={
+          receiptPreview ? (
+            <>
+              <div className="data-chip">{receiptPreview.documentCode}</div>
+              <div className="data-chip">{receiptPreview.modeLabel}</div>
+            </>
+          ) : undefined
+        }
+        footer={
+          receiptPreview ? (
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <Button variant="secondary" onClick={() => setReceiptPreview(null)}>
+                Yopish
+              </Button>
+              <Button className="gap-2" onClick={() => handlePrintReceipt(receiptPreview)}>
+                <Printer className="h-4 w-4" />
+                Chekni chop etish
+              </Button>
+            </div>
+          ) : undefined
+        }
+      >
+        {receiptPreview ? <ReceiptPreview receipt={receiptPreview} /> : null}
       </ResponsiveModal>
 
       <WizardModal

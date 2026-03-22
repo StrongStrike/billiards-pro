@@ -19,7 +19,7 @@ import { Panel } from "@/components/ui/panel";
 import { ModalNote, ModalStat, ResponsiveModal } from "@/components/ui/responsive-modal";
 import { Reveal, Stagger, StaggerItem } from "@/components/ui/reveal";
 import { Select } from "@/components/ui/select";
-import { useModalDismiss, useToast } from "@/components/ui/modal-provider";
+import { ModalDismissButton, useToast } from "@/components/ui/modal-provider";
 import { patchJson } from "@/lib/client/api";
 import { useBootstrapQuery } from "@/lib/hooks/use-club-data";
 import { MetricCard, SectionHeader } from "@/features/shared";
@@ -121,7 +121,6 @@ export function SettingsPage() {
   const bootstrapQuery = useBootstrapQuery();
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
-  const requestTopLayerClose = useModalDismiss();
   const [modal, setModal] = useState<SettingsModal>(null);
   const [pending, startTransition] = useTransition();
 
@@ -367,9 +366,9 @@ export function SettingsPage() {
         ]}
         footer={
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <Button variant="secondary" onClick={requestTopLayerClose} disabled={pending}>
+            <ModalDismissButton variant="secondary" disabled={pending}>
               Yopish
-            </Button>
+            </ModalDismissButton>
             <Button
               onClick={() =>
                 runSettingsUpdate(
@@ -437,9 +436,9 @@ export function SettingsPage() {
         ]}
         footer={
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <Button variant="secondary" onClick={requestTopLayerClose} disabled={pending}>
+            <ModalDismissButton variant="secondary" disabled={pending}>
               Yopish
-            </Button>
+            </ModalDismissButton>
             <Button
               onClick={() =>
                 runSettingsUpdate(
@@ -502,9 +501,9 @@ export function SettingsPage() {
         ]}
         footer={
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <Button variant="secondary" onClick={requestTopLayerClose} disabled={pending}>
+            <ModalDismissButton variant="secondary" disabled={pending}>
               Yopish
-            </Button>
+            </ModalDismissButton>
             <Button
               onClick={() =>
                 runSettingsUpdate(
@@ -578,9 +577,9 @@ export function SettingsPage() {
         ]}
         footer={
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <Button variant="secondary" onClick={requestTopLayerClose} disabled={pending}>
+            <ModalDismissButton variant="secondary" disabled={pending}>
               Yopish
-            </Button>
+            </ModalDismissButton>
             <Button
               onClick={() =>
                 runSettingsUpdate(
@@ -643,9 +642,9 @@ export function SettingsPage() {
         ]}
         footer={
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <Button variant="secondary" onClick={requestTopLayerClose} disabled={pending}>
+            <ModalDismissButton variant="secondary" disabled={pending}>
               Yopish
-            </Button>
+            </ModalDismissButton>
             <Button
               onClick={() =>
                 runSettingsUpdate(

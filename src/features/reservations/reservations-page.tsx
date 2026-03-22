@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Drawer } from "@/components/ui/drawer";
 import { Input, Textarea } from "@/components/ui/input";
-import { useModalDismiss } from "@/components/ui/modal-provider";
+import { ModalDismissButton } from "@/components/ui/modal-provider";
 import { Panel } from "@/components/ui/panel";
 import { ModalNote, ModalStat, ResponsiveModal } from "@/components/ui/responsive-modal";
 import { Reveal, Stagger, StaggerItem } from "@/components/ui/reveal";
@@ -235,7 +235,6 @@ const ReservationsTimeline = memo(function ReservationsTimeline({
 export function ReservationsPage() {
   const bootstrapQuery = useBootstrapQuery();
   const queryClient = useQueryClient();
-  const requestTopLayerClose = useModalDismiss();
   const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [pending, startTransition] = useTransition();
   const [selectedDay, setSelectedDay] = useState("");
@@ -710,9 +709,9 @@ export function ReservationsPage() {
         }
         footer={
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <Button variant="secondary" className="sm:min-w-36" onClick={requestTopLayerClose} disabled={pending}>
+            <ModalDismissButton variant="secondary" className="sm:min-w-36" disabled={pending}>
               Yopish
-            </Button>
+            </ModalDismissButton>
             <Button
               type="button"
               className="sm:min-w-44"
@@ -832,9 +831,9 @@ export function ReservationsPage() {
         }
         footer={
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <Button variant="secondary" className="sm:min-w-36" onClick={requestTopLayerClose} disabled={pending}>
+            <ModalDismissButton variant="secondary" className="sm:min-w-36" disabled={pending}>
               Yopish
-            </Button>
+            </ModalDismissButton>
             <Button form="reservation-form" type="submit" className="sm:min-w-44" disabled={pending}>
               {pending
                 ? "Saqlanmoqda..."

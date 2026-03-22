@@ -8,8 +8,10 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { CheckCircle2, CircleAlert, Info, TriangleAlert, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -93,6 +95,7 @@ type ModalSystemContextValue = {
 };
 
 const ModalSystemContext = createContext<ModalSystemContextValue | null>(null);
+const CurrentModalDismissContext = createContext<(() => void) | null>(null);
 
 const toastStyles: Record<ToastTone, string> = {
   success: "border-emerald-300/18 bg-emerald-400/12 text-emerald-50",
@@ -449,8 +452,9 @@ export function ModalProvider({ children }: { children: ReactNode }) {
         ))}
       </div>
 
-      {closePrompt ? (
-        <div className="fixed inset-0 z-[160]">
+      {typeof document !== "undefined" && closePrompt
+        ? createPortal(
+        <div data-modal-root="true" className="fixed inset-0 z-[220]">
           <button
             type="button"
             aria-label="Saqlanmagan o'zgarishlar oynasini yopish"
@@ -491,7 +495,10 @@ export function ModalProvider({ children }: { children: ReactNode }) {
             </div>
           </div>
         </div>
-      ) : null}
+          ,
+          document.body,
+        )
+        : null}
     </ModalSystemContext.Provider>
   );
 }
@@ -515,10 +522,44 @@ export function useModalSystem() {
 }
 
 export function useModalDismiss() {
+  const currentDismiss = useContext(CurrentModalDismissContext);
   const context = useContext(ModalSystemContext);
-  if (!context) {
+  if (!currentDismiss && !context) {
     throw new Error("useModalDismiss must be used inside ModalProvider");
   }
 
-  return () => context.requestTopLayerClose("button");
+  if (currentDismiss) {
+    return currentDismiss;
+  }
+
+  const modalSystem = context!;
+  return () => modalSystem.requestTopLayerClose("button");
+}
+
+export function ModalDismissProvider({
+  dismiss,
+  children,
+}: {
+  dismiss: () => void;
+  children: ReactNode;
+}) {
+  return <CurrentModalDismissContext.Provider value={dismiss}>{children}</CurrentModalDismissContext.Provider>;
+}
+
+type ModalDismissButtonProps = ComponentProps<typeof Button>;
+
+export function ModalDismissButton({ onClick, ...props }: ModalDismissButtonProps) {
+  const dismiss = useModalDismiss();
+
+  return (
+    <Button
+      {...props}
+      onClick={(event) => {
+        onClick?.(event);
+        if (!event.defaultPrevented) {
+          dismiss();
+        }
+      }}
+    />
+  );
 }

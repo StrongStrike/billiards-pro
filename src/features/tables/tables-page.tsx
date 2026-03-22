@@ -2,19 +2,28 @@
 
 import { useCallback, useMemo, useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { CirclePlay, Clock3, CupSoda, Play, Square, Ticket, TimerReset, WalletCards } from "lucide-react";
+import { CirclePlay, Clock3, CupSoda, Play, Printer, Square, Ticket, TimerReset, WalletCards } from "lucide-react";
 
+import { ReceiptPreview } from "@/components/print/receipt-preview";
 import { Button } from "@/components/ui/button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Drawer } from "@/components/ui/drawer";
 import { Input } from "@/components/ui/input";
-import { useModalDismiss } from "@/components/ui/modal-provider";
+import { ModalDismissButton } from "@/components/ui/modal-provider";
 import { Panel } from "@/components/ui/panel";
 import { ModalNote, ModalStat, ResponsiveModal } from "@/components/ui/responsive-modal";
 import { Reveal, Stagger, StaggerItem } from "@/components/ui/reveal";
 import { Select } from "@/components/ui/select";
 import { patchJson, postJson } from "@/lib/client/api";
 import { useBootstrapQuery } from "@/lib/hooks/use-club-data";
+import { openPrintDocument } from "@/lib/print";
+import {
+  buildReceiptHtml,
+  createDocumentCode,
+  type PrintableReceipt,
+  type PrintableReceiptAdjustment,
+  type PrintableReceiptLine,
+} from "@/lib/receipts";
 import { cn, formatClock, formatCurrency, formatDuration } from "@/lib/utils";
 import { MetricCard, SectionHeader, TableCard } from "@/features/shared";
 import type { BillAdjustment, Order, OrderItem, Product, Reservation, TableSnapshot } from "@/types/club";
@@ -28,10 +37,22 @@ const EMPTY_BILL_ADJUSTMENTS: BillAdjustment[] = [];
 
 type TableModal = "start" | "extend" | "adjust" | "order" | "stop" | null;
 
+function getAdjustmentLabel(type: BillAdjustment["type"]) {
+  if (type === "discount") {
+    return "Chegirma";
+  }
+  if (type === "compliment") {
+    return "Komplement";
+  }
+  if (type === "free_minutes") {
+    return "Bepul daqiqa";
+  }
+  return "Qo'lda qo'shilgan summa";
+}
+
 export function TablesPage() {
   const queryClient = useQueryClient();
   const bootstrapQuery = useBootstrapQuery();
-  const requestTopLayerClose = useModalDismiss();
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [startCustomer, setStartCustomer] = useState("");
   const [startNote, setStartNote] = useState("");
@@ -43,6 +64,7 @@ export function TablesPage() {
   const [adjustmentReason, setAdjustmentReason] = useState("");
   const [feedback, setFeedback] = useState<string | null>(null);
   const [activeModal, setActiveModal] = useState<TableModal>(null);
+  const [receiptPreview, setReceiptPreview] = useState<PrintableReceipt | null>(null);
   const [pending, startTransition] = useTransition();
 
   async function refreshData() {
@@ -140,6 +162,28 @@ export function TablesPage() {
         : [],
     [billAdjustments, selectedTable],
   );
+  const selectedSessionReceiptLines = useMemo<PrintableReceiptLine[]>(
+    () =>
+      selectedSessionOrderItems.map((item) => ({
+        name: item.productName,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        total: item.unitPrice * item.quantity,
+      })),
+    [selectedSessionOrderItems],
+  );
+  const selectedSessionAdjustmentLines = useMemo<PrintableReceiptAdjustment[]>(
+    () =>
+      selectedSessionAdjustments.map((adjustment) => ({
+        label: getAdjustmentLabel(adjustment.type),
+        value:
+          adjustment.type === "free_minutes"
+            ? `-${adjustment.minutes ?? 0} daqiqa`
+            : `${adjustment.type === "manual_charge" ? "+" : "-"}${formatCurrency(adjustment.amount ?? 0, settings?.currency ?? "UZS")}`,
+        reason: adjustment.reason,
+      })),
+    [selectedSessionAdjustments, settings?.currency],
+  );
   const startModalDirty = startCustomer.trim() !== "" || startNote.trim() !== "";
   const extendModalDirty = extendMinutes !== "30";
   const adjustModalDirty =
@@ -148,6 +192,50 @@ export function TablesPage() {
 
   if (bootstrapQuery.isPending || !bootstrapQuery.data || !settings) {
     return <Panel className="min-h-[60vh] animate-pulse bg-white/5" />;
+  }
+
+  const selectedSessionReceipt =
+    selectedTable?.activeSession && selectedTable.currentSummary
+      ? ({
+          title: "Stol cheki",
+          clubName: settings.clubName,
+          documentCode: createDocumentCode("TABLE", selectedTable.activeSession.id),
+          printedAt: new Date().toISOString(),
+          timezone: settings.timezone,
+          currency: settings.currency,
+          operatorName: bootstrapQuery.data.operator.name,
+          modeLabel: selectedTable.type === "vip" ? "VIP seans" : "Oddiy seans",
+          tableName: selectedTable.name,
+          customerName: selectedTable.activeSession.customerName,
+          sessionStartedAt: selectedTable.activeSession.startedAt,
+          sessionDurationMinutes: selectedTable.currentSummary.durationMinutes,
+          gameCharge: selectedTable.currentSummary.gameCharge,
+          items: selectedSessionReceiptLines,
+          barTotal: selectedTable.currentSummary.orderTotal,
+          adjustments: selectedSessionAdjustmentLines,
+          total: selectedTable.currentSummary.total,
+          notes: [
+            selectedTable.pendingOrderTotal > 0
+              ? `Bar buyurtma: ${formatCurrency(selectedTable.pendingOrderTotal, settings.currency)}`
+              : "Bar buyurtma yo'q",
+            selectedTable.currentSummary.freeMinutes > 0
+              ? `Bepul daqiqa: ${selectedTable.currentSummary.freeMinutes}`
+              : "Bepul daqiqa qo'llanmagan",
+          ],
+          footerNote: "Yakuniy stol cheki termal printer uchun tayyor.",
+        } satisfies PrintableReceipt)
+      : null;
+
+  function handlePrintReceipt(receipt: PrintableReceipt) {
+    try {
+      openPrintDocument({
+        title: receipt.documentCode,
+        bodyHtml: buildReceiptHtml(receipt),
+      });
+      setFeedback("Chek uchun print oynasi ochildi");
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : "Print oynasi ochilmadi");
+    }
   }
 
   return (
@@ -247,11 +335,17 @@ export function TablesPage() {
                 Yopish
               </Button>
               {selectedTable.activeSession ? (
-                <div className="flex flex-col gap-3 sm:flex-row">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:justify-end">
                   {selectedLinkedReservation ? (
                     <Button variant="secondary" className="gap-2 sm:min-w-40" onClick={() => setActiveModal("extend")}>
                       <TimerReset className="h-4 w-4" />
                       Vaqtni uzaytirish
+                    </Button>
+                  ) : null}
+                  {selectedSessionReceipt ? (
+                    <Button variant="secondary" className="gap-2 sm:min-w-40" onClick={() => setReceiptPreview(selectedSessionReceipt)}>
+                      <Printer className="h-4 w-4" />
+                      Chek
                     </Button>
                   ) : null}
                   <Button
@@ -547,9 +641,9 @@ export function TablesPage() {
             }
             footer={
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <Button variant="secondary" className="sm:min-w-36" onClick={requestTopLayerClose} disabled={pending}>
-                  Yopish
-                </Button>
+                  <ModalDismissButton variant="secondary" className="sm:min-w-36" disabled={pending}>
+                    Yopish
+                  </ModalDismissButton>
                 <Button form="start-session-form" type="submit" className="sm:min-w-44" disabled={pending}>
                   {pending ? "Boshlanmoqda..." : "Seansni boshlash"}
                 </Button>
@@ -637,9 +731,9 @@ export function TablesPage() {
             }
             footer={
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <Button variant="secondary" className="sm:min-w-36" onClick={requestTopLayerClose} disabled={pending}>
-                  Yopish
-                </Button>
+                  <ModalDismissButton variant="secondary" className="sm:min-w-36" disabled={pending}>
+                    Yopish
+                  </ModalDismissButton>
                 <Button form="extend-session-form" type="submit" className="sm:min-w-44" disabled={pending}>
                   {pending ? "Uzaytirilmoqda..." : "Vaqtni uzaytirish"}
                 </Button>
@@ -754,9 +848,9 @@ export function TablesPage() {
             }
             footer={
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <Button variant="secondary" className="sm:min-w-36" onClick={requestTopLayerClose} disabled={pending}>
-                  Yopish
-                </Button>
+                  <ModalDismissButton variant="secondary" className="sm:min-w-36" disabled={pending}>
+                    Yopish
+                  </ModalDismissButton>
                 <Button
                   form="bill-adjustment-form"
                   type="submit"
@@ -898,9 +992,9 @@ export function TablesPage() {
             }
             footer={
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                <Button variant="secondary" className="sm:min-w-36" onClick={requestTopLayerClose} disabled={pending}>
-                  Yopish
-                </Button>
+                  <ModalDismissButton variant="secondary" className="sm:min-w-36" disabled={pending}>
+                    Yopish
+                  </ModalDismissButton>
                 <Button form="table-order-form" type="submit" className="sm:min-w-44" disabled={pending}>
                   {pending ? "Qo'shilmoqda..." : "Buyurtma qo'shish"}
                 </Button>
@@ -997,15 +1091,25 @@ export function TablesPage() {
           <ConfirmModal
             open={activeModal === "stop" && Boolean(selectedTable.activeSession)}
             onClose={closeModal}
-            onConfirm={() =>
+            onConfirm={() => {
+              const finalReceipt = selectedSessionReceipt;
               runAction(
                 async () => {
                   await postJson(`/api/tables/${selectedTable.id}/session/stop`, {});
                 },
                 "Seans muvaffaqiyatli yakunlandi",
-                closeModal,
-              )
-            }
+                () => {
+                  closeModal();
+                  setSelectedTableId(null);
+                  if (finalReceipt) {
+                    setReceiptPreview({
+                      ...finalReceipt,
+                      printedAt: new Date().toISOString(),
+                    });
+                  }
+                },
+              );
+            }}
             title={`${selectedTable.name} seansini yakunlash`}
             description="Checkout vaqtida o'yin summasi va tasdiqlangan bar buyurtmalari birlashtirilib yakuniy chek hosil qilinadi."
             confirmLabel="Seansni yakunlash"
@@ -1037,6 +1141,39 @@ export function TablesPage() {
           />
         </>
       ) : null}
+
+      <ResponsiveModal
+        open={Boolean(receiptPreview)}
+        onClose={() => setReceiptPreview(null)}
+        title="Stol cheki preview"
+        description="Kassir bu oynada final session receiptni ko'rib, termal printerga chiqaradi. Seans yopilgandan keyin ham shu preview saqlanadi."
+        tone="green"
+        size="lg"
+        icon={<Printer className="h-5 w-5" />}
+        headerMeta={
+          receiptPreview ? (
+            <>
+              <div className="data-chip">{receiptPreview.documentCode}</div>
+              <div className="data-chip">{receiptPreview.tableName}</div>
+            </>
+          ) : undefined
+        }
+        footer={
+          receiptPreview ? (
+            <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+              <Button variant="secondary" onClick={() => setReceiptPreview(null)}>
+                Yopish
+              </Button>
+              <Button className="gap-2" onClick={() => handlePrintReceipt(receiptPreview)}>
+                <Printer className="h-4 w-4" />
+                Chekni chop etish
+              </Button>
+            </div>
+          ) : undefined
+        }
+      >
+        {receiptPreview ? <ReceiptPreview receipt={receiptPreview} /> : null}
+      </ResponsiveModal>
     </div>
   );
 }

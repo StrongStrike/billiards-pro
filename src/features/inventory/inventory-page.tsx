@@ -6,7 +6,7 @@ import { ArrowDownUp, Boxes, PencilLine, TriangleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useModalDismiss } from "@/components/ui/modal-provider";
+import { ModalDismissButton } from "@/components/ui/modal-provider";
 import { Panel } from "@/components/ui/panel";
 import { ModalNote, ModalStat, ResponsiveModal } from "@/components/ui/responsive-modal";
 import { Reveal, Stagger, StaggerItem } from "@/components/ui/reveal";
@@ -21,7 +21,6 @@ type InventoryModal = "product" | "stock" | null;
 export function InventoryPage() {
   const queryClient = useQueryClient();
   const bootstrapQuery = useBootstrapQuery();
-  const requestTopLayerClose = useModalDismiss();
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [activeModal, setActiveModal] = useState<InventoryModal>(null);
   const [pending, startTransition] = useTransition();
@@ -353,9 +352,9 @@ export function InventoryPage() {
             footer={
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
                 <div className="flex flex-col-reverse gap-3 sm:flex-row">
-                  <Button variant="secondary" onClick={requestTopLayerClose} disabled={pending}>
+                  <ModalDismissButton variant="secondary" disabled={pending}>
                     Yopish
-                  </Button>
+                  </ModalDismissButton>
                   <Button
                     variant="ghost"
                     disabled={pending}
@@ -462,9 +461,9 @@ export function InventoryPage() {
             }
             footer={
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                  <Button variant="secondary" onClick={requestTopLayerClose} disabled={pending}>
-                  Yopish
-                </Button>
+                  <ModalDismissButton variant="secondary" disabled={pending}>
+                    Yopish
+                  </ModalDismissButton>
                 <Button
                   disabled={pending}
                   onClick={() =>
