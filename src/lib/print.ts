@@ -183,6 +183,9 @@ export function openPrintDocument({ title, bodyHtml }: PrintDocumentOptions) {
   </body>
 </html>`;
 
+  let printStarted = false;
+  let cleanupScheduled = false;
+
   const cleanup = () => {
     iframe.onload = null;
     if (iframe.parentNode) {
@@ -190,40 +193,53 @@ export function openPrintDocument({ title, bodyHtml }: PrintDocumentOptions) {
     }
   };
 
-  iframe.onload = () => {
-    const printWindow = iframe.contentWindow;
-    if (!printWindow) {
-      cleanup();
+  const scheduleCleanup = (delay = 150) => {
+    if (cleanupScheduled) {
+      return;
+    }
+    cleanupScheduled = true;
+    window.setTimeout(cleanup, delay);
+  };
+
+  const startPrint = () => {
+    if (printStarted) {
       return;
     }
 
+    const printWindow = iframe.contentWindow;
+    const iframeDocument = iframe.contentDocument;
+    if (!printWindow || !iframeDocument) {
+      scheduleCleanup();
+      return;
+    }
+
+    if (iframeDocument.title !== title) {
+      return;
+    }
+
+    printStarted = true;
+
     const afterPrint = () => {
       printWindow.removeEventListener("afterprint", afterPrint);
-      window.setTimeout(cleanup, 150);
+      scheduleCleanup();
     };
 
     printWindow.addEventListener("afterprint", afterPrint);
+
     window.setTimeout(() => {
       try {
         printWindow.focus();
         printWindow.print();
       } catch {
-        cleanup();
+        scheduleCleanup();
       }
-    }, 120);
+    }, 80);
 
-    window.setTimeout(cleanup, 60000);
+    window.setTimeout(() => scheduleCleanup(0), 60000);
   };
 
+  iframe.onload = startPrint;
+
+  iframe.srcdoc = html;
   document.body.appendChild(iframe);
-
-  const iframeDocument = iframe.contentDocument;
-  if (!iframeDocument) {
-    cleanup();
-    throw new Error("Print hujjatini yaratib bo'lmadi");
-  }
-
-  iframeDocument.open();
-  iframeDocument.write(html);
-  iframeDocument.close();
 }
