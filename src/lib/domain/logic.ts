@@ -3,15 +3,19 @@ import { addMinutes, differenceInMinutes } from "date-fns";
 import { getDashboardBuckets, getReportChartBuckets, getReportWindow } from "@/lib/time";
 import type {
   BillAdjustment,
+  CashMovement,
   ClubSettings,
+  OperatorSummary,
   CounterSale,
   DashboardActivityPoint,
   Order,
   OrderItem,
   Product,
+  ProductCategory,
   RangeReport,
   ReportRange,
   Reservation,
+  Shift,
   Table,
   TableSession,
 } from "@/types/club";
@@ -46,11 +50,9 @@ export function getSessionOverlapMinutes(
 export function calculateGameCharge(
   session: TableSession,
   endIso = new Date().toISOString(),
-  freeMinutes = 0,
 ) {
   const durationMinutes = differenceInWholeMinutes(session.startedAt, session.endedAt ?? endIso);
-  const billableMinutes = Math.max(durationMinutes - freeMinutes, 0);
-  return Math.round((session.hourlyRateSnapshot * billableMinutes) / 60);
+  return Math.round((session.hourlyRateSnapshot * durationMinutes) / 60);
 }
 
 export function getSessionBillAdjustments(sessionId: string, billAdjustments: BillAdjustment[]) {
@@ -60,20 +62,13 @@ export function getSessionBillAdjustments(sessionId: string, billAdjustments: Bi
 export function summarizeBillAdjustments(adjustments: BillAdjustment[]) {
   return adjustments.reduce(
     (summary, adjustment) => {
-      if (adjustment.type === "free_minutes") {
-        summary.freeMinutes += adjustment.minutes ?? 0;
-        return summary;
-      }
-
       const amount = adjustment.amount ?? 0;
       if (adjustment.type === "manual_charge") {
         summary.adjustmentAmount += amount;
-      } else {
-        summary.adjustmentAmount -= amount;
       }
       return summary;
     },
-    { adjustmentAmount: 0, freeMinutes: 0 },
+    { adjustmentAmount: 0 },
   );
 }
 
@@ -84,9 +79,9 @@ export function calculateSessionSummary(
   endIso = new Date().toISOString(),
 ) {
   const durationMinutes = differenceInWholeMinutes(session.startedAt, session.endedAt ?? endIso);
-  const { adjustmentAmount, freeMinutes } = summarizeBillAdjustments(adjustments);
-  const baseGameCharge = calculateGameCharge(session, endIso, 0);
-  const gameCharge = calculateGameCharge(session, endIso, freeMinutes);
+  const { adjustmentAmount } = summarizeBillAdjustments(adjustments);
+  const baseGameCharge = calculateGameCharge(session, endIso);
+  const gameCharge = calculateGameCharge(session, endIso);
   const rawTotal = gameCharge + orderTotal + adjustmentAmount;
 
   return {
@@ -96,8 +91,42 @@ export function calculateSessionSummary(
     adjustmentAmount,
     total: Math.max(rawTotal, 0),
     durationMinutes,
-    freeMinutes,
   };
+}
+
+export function getCashMovementSignedAmount(movement: Pick<CashMovement, "type" | "amount">) {
+  if (movement.type === "service_out" || movement.type === "expense" || movement.type === "cash_drop") {
+    return -movement.amount;
+  }
+
+  return movement.amount;
+}
+
+function sumSessionOrderTotal(sessionId: string, orders: Order[], orderItems: OrderItem[]) {
+  const sessionOrderIds = new Set(
+    orders.filter((order) => order.sessionId === sessionId && order.status === "paid").map((order) => order.id),
+  );
+
+  return calculateOrderItemsTotal(orderItems.filter((item) => sessionOrderIds.has(item.orderId)));
+}
+
+function sumCompletedSessionRevenue(
+  sessions: TableSession[],
+  orders: Order[],
+  orderItems: OrderItem[],
+  billAdjustments: BillAdjustment[],
+) {
+  return sessions.reduce((sum, session) => {
+    const sessionAdjustments = getSessionBillAdjustments(session.id, billAdjustments);
+    const sessionOrderTotal = sumSessionOrderTotal(session.id, orders, orderItems);
+    return sum + calculateSessionSummary(session, sessionOrderTotal, sessionAdjustments, session.endedAt).total;
+  }, 0);
+}
+
+function shiftOverlapsWindow(shift: Shift, start: Date, endExclusive: Date, now: Date) {
+  const openedAt = new Date(shift.openedAt).getTime();
+  const shiftEnd = new Date(shift.closedAt ?? now.toISOString()).getTime();
+  return openedAt < endExclusive.getTime() && shiftEnd > start.getTime();
 }
 
 export function calculateOrderItemsTotal(items: Array<{ quantity: number; unitPrice: number }>) {
@@ -260,7 +289,11 @@ export function buildReport({
   orders,
   orderItems,
   products,
+  categories,
+  cashMovements,
   billAdjustments,
+  shifts,
+  operators,
 }: {
   range: ReportRange;
   settings: ClubSettings;
@@ -270,7 +303,11 @@ export function buildReport({
   orders: Order[];
   orderItems: OrderItem[];
   products: Product[];
+  categories: ProductCategory[];
+  cashMovements: CashMovement[];
   billAdjustments: BillAdjustment[];
+  shifts: Shift[];
+  operators: OperatorSummary[];
 }): RangeReport {
   const clock = now ?? new Date();
   const window = getReportWindow(range, settings.timezone, clock);
@@ -294,6 +331,8 @@ export function buildReport({
   });
   const relevantOrderIds = new Set(relevantOrders.map((order) => order.id));
   const relevantItems = orderItems.filter((item) => relevantOrderIds.has(item.orderId));
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
+  const operatorById = new Map(operators.map((operator) => [operator.id, operator]));
 
   const adjustmentsTotal = relevantSessions.reduce(
     (sum, session) => sum + summarizeBillAdjustments(getSessionBillAdjustments(session.id, billAdjustments)).adjustmentAmount,
@@ -325,6 +364,7 @@ export function buildReport({
   const topTables = tables
     .map((table) => {
       const tableSessions = relevantSessions.filter((session) => session.tableId === table.id);
+      const sessionsCount = tableSessions.length;
       return {
         tableId: table.id,
         tableName: table.name,
@@ -345,11 +385,60 @@ export function buildReport({
           (sum, session) => sum + differenceInWholeMinutes(session.startedAt, session.endedAt!),
           0,
         ),
+        sessionsCount,
+        averageCheck:
+          sessionsCount > 0
+            ? Math.round(
+                tableSessions.reduce((sum, session) => {
+                  const summary = calculateSessionSummary(
+                    session,
+                    calculateOrderItemsTotal(
+                      relevantItems.filter((item) =>
+                        relevantOrders.some((order) => order.id === item.orderId && order.sessionId === session.id),
+                      ),
+                    ),
+                    getSessionBillAdjustments(session.id, billAdjustments),
+                    session.endedAt,
+                  );
+                  return sum + summary.total;
+                }, 0) / sessionsCount,
+              )
+            : 0,
       };
     })
     .filter((table) => table.revenue > 0 || table.minutes > 0)
     .sort((left, right) => right.revenue - left.revenue)
     .slice(0, 5);
+
+  const tablePerformance = tables
+    .map((table) => {
+      const tableSessions = relevantSessions.filter((session) => session.tableId === table.id);
+      const revenue = tableSessions.reduce((sum, session) => {
+        const sessionSummary = calculateSessionSummary(
+          session,
+          sumSessionOrderTotal(session.id, relevantOrders, relevantItems),
+          getSessionBillAdjustments(session.id, billAdjustments),
+          session.endedAt,
+        );
+        return sum + sessionSummary.total;
+      }, 0);
+      const minutes = tableSessions.reduce(
+        (sum, session) => sum + differenceInWholeMinutes(session.startedAt, session.endedAt!),
+        0,
+      );
+      const sessionsCount = tableSessions.length;
+
+      return {
+        tableId: table.id,
+        tableName: table.name,
+        revenue,
+        minutes,
+        sessionsCount,
+        averageCheck: sessionsCount > 0 ? Math.round(revenue / sessionsCount) : 0,
+      };
+    })
+    .filter((table) => table.revenue > 0 || table.minutes > 0)
+    .sort((left, right) => right.revenue - left.revenue);
 
   const topProducts = products
     .map((product) => {
@@ -364,6 +453,101 @@ export function buildReport({
     .filter((product) => product.quantity > 0)
     .sort((left, right) => right.revenue - left.revenue)
     .slice(0, 5);
+
+  const categorySales = categories
+    .map((category) => {
+      const categoryProductIds = new Set(
+        products.filter((product) => product.categoryId === category.id).map((product) => product.id),
+      );
+      const categoryItems = relevantItems.filter((item) => categoryProductIds.has(item.productId));
+      return {
+        categoryId: category.id,
+        categoryName: category.name,
+        revenue: calculateOrderItemsTotal(categoryItems),
+        quantity: categoryItems.reduce((sum, item) => sum + item.quantity, 0),
+      };
+    })
+    .filter((category) => category.quantity > 0)
+    .sort((left, right) => right.revenue - left.revenue);
+
+  const lowStockAnalytics = products
+    .filter((product) => product.isActive && product.stock <= product.threshold)
+    .map((product) => ({
+      productId: product.id,
+      productName: product.name,
+      categoryName: categoryById.get(product.categoryId)?.name ?? "Kategoriya",
+      stock: product.stock,
+      threshold: product.threshold,
+      gap: Math.max(product.threshold - product.stock, 0),
+    }))
+    .sort((left, right) => right.gap - left.gap || left.stock - right.stock);
+
+  const shiftHistory = shifts
+    .filter((shift) => shiftOverlapsWindow(shift, window.start, window.endExclusive, clock))
+    .map((shift) => {
+      const shiftStart = new Date(shift.openedAt);
+      const shiftEnd = new Date(shift.closedAt ?? clock.toISOString());
+      const shiftSessions = sessions.filter((session) => {
+        if (session.status !== "completed" || !session.endedAt) {
+          return false;
+        }
+
+        const endedAt = new Date(session.endedAt).getTime();
+        return endedAt >= shiftStart.getTime() && endedAt < shiftEnd.getTime();
+      });
+      const shiftOrders = orders.filter((order) => {
+        if (order.status !== "paid") {
+          return false;
+        }
+
+        const stamp = new Date(order.paidAt ?? order.createdAt).getTime();
+        return stamp >= shiftStart.getTime() && stamp < shiftEnd.getTime();
+      });
+      const shiftOrderIds = new Set(shiftOrders.map((order) => order.id));
+      const shiftItems = orderItems.filter((item) => shiftOrderIds.has(item.orderId));
+      const shiftRevenue =
+        sumCompletedSessionRevenue(shiftSessions, shiftOrders, shiftItems, billAdjustments) +
+        calculateOrderItemsTotal(
+          shiftItems.filter(
+            (item) => !shiftOrders.some((order) => order.id === item.orderId && order.sessionId),
+          ),
+        );
+      const shiftCashMovementNet = cashMovements
+        .filter((movement) => {
+          const createdAt = new Date(movement.createdAt).getTime();
+          return createdAt >= shiftStart.getTime() && createdAt < shiftEnd.getTime();
+        })
+        .reduce((sum, movement) => sum + getCashMovementSignedAmount(movement), 0);
+      const expectedCash = shift.openingCash + shiftRevenue + shiftCashMovementNet;
+      const discrepancy =
+        typeof shift.closingCash === "number" ? shift.closingCash - expectedCash : undefined;
+
+      return {
+        shiftId: shift.id,
+        status: shift.status,
+        openingCash: shift.openingCash,
+        closingCash: shift.closingCash,
+        revenue: shiftRevenue,
+        cashMovementNet: shiftCashMovementNet,
+        expectedCash,
+        discrepancy,
+        openedAt: shift.openedAt,
+        pausedAt: shift.pausedAt,
+        closedAt: shift.closedAt,
+        openedByOperatorName: shift.openedByOperatorId
+          ? operatorById.get(shift.openedByOperatorId)?.name
+          : undefined,
+        closedByOperatorName: shift.closedByOperatorId
+          ? operatorById.get(shift.closedByOperatorId)?.name
+          : undefined,
+      };
+    })
+    .sort((left, right) => new Date(right.openedAt).getTime() - new Date(left.openedAt).getTime());
+
+  const cashDiscrepancyTotal = shiftHistory.reduce(
+    (sum, shift) => sum + (typeof shift.discrepancy === "number" ? shift.discrepancy : 0),
+    0,
+  );
 
   const chart = getReportChartBuckets(range, settings.timezone, clock).map((bucket) => {
     const bucketSessions = sessions.filter((session) => {
@@ -434,8 +618,13 @@ export function buildReport({
     timezone: settings.timezone,
     periodStart: window.start.toISOString(),
     periodEnd: addMinutes(window.endExclusive, -1).toISOString(),
+    cashDiscrepancyTotal,
     topTables,
+    tablePerformance,
     topProducts,
+    categorySales,
+    lowStockAnalytics,
+    shiftHistory,
     chart,
   };
 }

@@ -4,7 +4,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useMemo, useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Activity, CalendarClock, ChevronRight, Gamepad2, HandCoins, Martini, ReceiptText, WalletCards } from "lucide-react";
+import { Activity, CalendarClock, ChevronRight, FileClock, Gamepad2, HandCoins, Martini, Pause, Play, ReceiptText, Square, WalletCards } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
@@ -15,10 +15,10 @@ import { ModalDismissButton, useToast } from "@/components/ui/modal-provider";
 import { ModalNote, ModalStat, ResponsiveModal } from "@/components/ui/responsive-modal";
 import { Reveal, Stagger, StaggerItem } from "@/components/ui/reveal";
 import { postJson } from "@/lib/client/api";
-import { useBootstrapQuery, useDashboardActivityQuery } from "@/lib/hooks/use-club-data";
+import { useAuditQuery, useBootstrapQuery, useDashboardActivityQuery } from "@/lib/hooks/use-club-data";
 import { formatClock, formatCurrency, formatDateTimeLabel } from "@/lib/utils";
 import { MetricCard, SectionHeader, TableCard } from "@/features/shared";
-import type { BillAdjustment, CashMovement, Reservation, TableSnapshot } from "@/types/club";
+import type { AuditLog, BillAdjustment, CashMovement, Reservation, Shift, TableSnapshot } from "@/types/club";
 
 const DashboardActivityChart = dynamic(
   () => import("@/components/charts/dashboard-activity-chart").then((module) => module.DashboardActivityChart),
@@ -29,10 +29,12 @@ const DashboardActivityChart = dynamic(
 );
 
 type KpiModalKey = "revenue" | "tables" | "reservations" | "bar" | null;
+type ShiftModalKey = "open" | "pause" | "resume" | "close" | null;
 const EMPTY_TABLES: TableSnapshot[] = [];
 const EMPTY_RESERVATIONS: Reservation[] = [];
 const EMPTY_CASH_MOVEMENTS: CashMovement[] = [];
 const EMPTY_BILL_ADJUSTMENTS: BillAdjustment[] = [];
+const EMPTY_AUDIT_LOGS: AuditLog[] = [];
 const cashMovementTypeCopy: Record<
   CashMovement["type"],
   { label: string; tone: "cyan" | "green" | "amber" | "slate"; sign: 1 | -1 }
@@ -54,9 +56,14 @@ export function DashboardPage() {
   const [cashAmount, setCashAmount] = useState("");
   const [cashReason, setCashReason] = useState("");
   const [cashPending, startCashTransition] = useTransition();
+  const [shiftModal, setShiftModal] = useState<ShiftModalKey>(null);
+  const [shiftCashValue, setShiftCashValue] = useState("0");
+  const [shiftNote, setShiftNote] = useState("");
+  const [shiftPending, startShiftTransition] = useTransition();
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [selectedReservationId, setSelectedReservationId] = useState<string | null>(null);
   const [kpiModal, setKpiModal] = useState<KpiModalKey>(null);
+  const [auditDrawerOpen, setAuditDrawerOpen] = useState(false);
   const payload = bootstrapQuery.data;
   const tables = payload?.tables ?? EMPTY_TABLES;
   const reservations = payload?.reservations ?? EMPTY_RESERVATIONS;
@@ -64,9 +71,15 @@ export function DashboardPage() {
   const billAdjustments =
     (payload as (typeof payload & { billAdjustments?: BillAdjustment[] }) | undefined)?.billAdjustments ??
     EMPTY_BILL_ADJUSTMENTS;
+  const activeShift =
+    (payload as (typeof payload & { activeShift?: Shift | null }) | undefined)?.activeShift ?? null;
+  const auditLogs =
+    (payload as (typeof payload & { auditLogs?: AuditLog[] }) | undefined)?.auditLogs ?? EMPTY_AUDIT_LOGS;
   const settings = payload?.settings;
   const kpis = payload?.kpis;
+  const operatorRole = payload?.operator.role ?? "admin";
   const activity = activityQuery.data ?? [];
+  const auditQuery = useAuditQuery(operatorRole === "admin" && auditDrawerOpen);
   const upcomingReservations = useMemo(
     () => reservations.filter((reservation) => reservation.status === "scheduled").slice(0, 4),
     [reservations],
@@ -76,6 +89,10 @@ export function DashboardPage() {
   const activeRevenueTables = tables.filter((table) => table.currentSummary).slice(0, 3);
   const recentCashMovements = cashMovements.slice(0, 4);
   const cashModalDirty = cashAmount.trim() !== "" || cashReason.trim() !== "";
+  const shiftModalDirty =
+    shiftModal === "open" || shiftModal === "close"
+      ? shiftCashValue !== "0" || shiftNote.trim() !== ""
+      : shiftNote.trim() !== "";
   const cashDeskAvailable =
     typeof kpis?.cashOnHand === "number" &&
     typeof kpis?.cashAdjustmentNet === "number" &&
@@ -87,6 +104,9 @@ export function DashboardPage() {
   const cashMovementsToday = cashDeskAvailable ? kpis.cashMovementsToday : 0;
   const billAdjustmentsToday = billAdjustmentsAvailable ? kpis.billAdjustmentsToday : 0;
   const recentBillAdjustments = billAdjustments.slice(0, 4);
+  const shiftSupportAvailable = Object.prototype.hasOwnProperty.call(payload ?? {}, "activeShift");
+  const auditFeed = auditQuery.data ?? auditLogs;
+  const recentAuditLogs = auditLogs.slice(0, 4);
 
   if (bootstrapQuery.isPending || !payload || !settings || !kpis) {
     return <Panel className="min-h-[60vh] animate-pulse bg-white/5" />;
@@ -119,6 +139,79 @@ export function DashboardPage() {
     setCashAmount("");
     setCashReason("");
     setCashModalOpen(false);
+  }
+
+  function openShiftModal(nextModal: ShiftModalKey) {
+    setShiftModal(nextModal);
+    setShiftCashValue(
+      nextModal === "close"
+        ? String(Math.max(cashOnHand, 0))
+        : nextModal === "open"
+          ? "0"
+          : shiftCashValue,
+    );
+    setShiftNote("");
+  }
+
+  function resetShiftModal() {
+    setShiftModal(null);
+    setShiftNote("");
+    setShiftCashValue("0");
+  }
+
+  function submitShiftAction() {
+    if (!shiftSupportAvailable) {
+      pushToast({
+        title: "Backend yangilanmagan",
+        description: "Smena moduli tashqi API ga hali deploy qilinmagan.",
+        tone: "error",
+      });
+      return;
+    }
+
+    const action = shiftModal;
+    if (!action) {
+      return;
+    }
+
+    const amount = Number(shiftCashValue);
+    startShiftTransition(async () => {
+      try {
+        if ((action === "open" || action === "close") && (!Number.isInteger(amount) || amount < 0)) {
+          throw new Error("Naqd summa musbat yoki nol bo'lishi kerak");
+        }
+
+        const endpoint = `/api/shifts/${action}`;
+        const payload =
+          action === "open"
+            ? { openingCash: amount, note: shiftNote }
+            : action === "close"
+              ? { closingCash: amount, note: shiftNote }
+              : { note: shiftNote };
+
+        await postJson<{ ok: true }>(endpoint, payload);
+        await queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+        pushToast({
+          title: "Smena holati yangilandi",
+          description:
+            action === "open"
+              ? "Yangi smena ochildi."
+              : action === "pause"
+                ? "Smena pauzaga qo'yildi."
+                : action === "resume"
+                  ? "Smena davom ettirildi."
+                  : "Smena yopildi.",
+          tone: "success",
+        });
+        resetShiftModal();
+      } catch (error) {
+        pushToast({
+          title: "Smena amali bajarilmadi",
+          description: error instanceof Error ? error.message : "Xatolik yuz berdi",
+          tone: "error",
+        });
+      }
+    });
   }
 
   function submitCashMovement() {
@@ -203,6 +296,109 @@ export function DashboardPage() {
           </button>
         </StaggerItem>
       </Stagger>
+
+      <Reveal>
+        <Panel className="hud-frame">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div>
+              <div className="text-xs uppercase tracking-[0.26em] text-cyan-300/70">Smena nazorati</div>
+              <div className="mt-2 font-display text-2xl font-bold text-white">
+                {activeShift
+                  ? activeShift.status === "paused"
+                    ? "Smena pauzada"
+                    : "Smena ochiq"
+                  : "Smena yopiq"}
+              </div>
+              <div className="mt-2 max-w-2xl text-sm leading-7 text-slate-400">
+                Kassa, stol va buyurtma amallari joriy smena kontekstida yuradi. Pauza va yopish amallari audit jurnaliga yoziladi.
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3 xl:min-w-[520px]">
+              <div className="rounded-[22px] border border-white/8 bg-white/[0.04] px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Holat</div>
+                <div className="mt-2 font-semibold text-white">
+                  {activeShift ? (activeShift.status === "paused" ? "Pauzada" : "Faol") : "Yopiq"}
+                </div>
+              </div>
+              <div className="rounded-[22px] border border-white/8 bg-white/[0.04] px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Boshlangan</div>
+                <div className="mt-2 font-semibold text-white">
+                  {activeShift ? formatDateTimeLabel(activeShift.openedAt, settings.timezone) : "Smena yo'q"}
+                </div>
+              </div>
+              <div className="rounded-[22px] border border-white/8 bg-white/[0.04] px-4 py-3">
+                <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Boshlang&#39;ich naqd</div>
+                <div className="mt-2 font-semibold text-white">
+                  {activeShift ? formatCurrency(activeShift.openingCash, settings.currency) : formatCurrency(0, settings.currency)}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:flex-wrap">
+            {!activeShift ? (
+              <Button className="gap-2" onClick={() => openShiftModal("open")} disabled={!shiftSupportAvailable}>
+                <Play className="h-4 w-4" />
+                Smenani ochish
+              </Button>
+            ) : activeShift.status === "open" ? (
+              <>
+                <Button variant="secondary" className="gap-2" onClick={() => openShiftModal("pause")} disabled={!shiftSupportAvailable}>
+                  <Pause className="h-4 w-4" />
+                  Pauza
+                </Button>
+                <Button variant="danger" className="gap-2" onClick={() => openShiftModal("close")} disabled={!shiftSupportAvailable}>
+                  <Square className="h-4 w-4" />
+                  Smenani yopish
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button className="gap-2" onClick={() => openShiftModal("resume")} disabled={!shiftSupportAvailable}>
+                  <Play className="h-4 w-4" />
+                  Davom ettirish
+                </Button>
+                <Button variant="danger" className="gap-2" onClick={() => openShiftModal("close")} disabled={!shiftSupportAvailable}>
+                  <Square className="h-4 w-4" />
+                  Smenani yopish
+                </Button>
+              </>
+            )}
+            {operatorRole === "admin" ? (
+              <Button variant="secondary" className="gap-2" onClick={() => setAuditDrawerOpen(true)}>
+                <FileClock className="h-4 w-4" />
+                Audit jurnali
+              </Button>
+            ) : null}
+          </div>
+
+          {!shiftSupportAvailable ? (
+            <div className="mt-4 rounded-[22px] border border-amber-300/18 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+              Smena moduli frontda tayyor, lekin joriy tashqi backend hali eski payload bilan ishlayotgan bo&#39;lishi mumkin.
+            </div>
+          ) : null}
+
+          {operatorRole === "admin" ? (
+            <div className="mt-5 grid gap-3 lg:grid-cols-2">
+              {recentAuditLogs.length === 0 ? (
+                <div className="rounded-[22px] border border-white/8 bg-white/[0.03] px-4 py-4 text-sm text-slate-500">
+                  Audit jurnali hozircha bo&#39;sh.
+                </div>
+              ) : (
+                recentAuditLogs.map((log) => (
+                  <div key={log.id} className="rounded-[22px] border border-white/8 bg-white/[0.03] px-4 py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="font-medium text-white">{log.description}</div>
+                      <div className="data-chip">{formatDateTimeLabel(log.createdAt, settings.timezone)}</div>
+                    </div>
+                    <div className="mt-2 text-sm text-slate-400">{log.action}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : null}
+        </Panel>
+      </Reveal>
 
       <div className={settings.showRightRail ? "dashboard-grid" : "space-y-4"}>
         <Reveal className="space-y-4">
@@ -425,6 +621,52 @@ export function DashboardPage() {
       </div>
 
       <Drawer
+        open={auditDrawerOpen}
+        onClose={() => setAuditDrawerOpen(false)}
+        title="Audit jurnali"
+        description="Admin uchun oxirgi tizim amallari: shift, session, bron, billing va sozlamalar shu yerda ko'rinadi."
+        tone="cyan"
+        size="lg"
+        icon={<FileClock className="h-5 w-5" />}
+        headerMeta={
+          <>
+            <div className="data-chip">{auditFeed.length} ta yozuv</div>
+            <div className="data-chip">Admin view</div>
+          </>
+        }
+        footer={
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={() => setAuditDrawerOpen(false)}>
+              Yopish
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          {auditFeed.length === 0 ? (
+            <ModalNote tone="slate">Audit yozuvlari hozircha topilmadi.</ModalNote>
+          ) : (
+            auditFeed.map((log) => (
+              <div key={log.id} className="rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="font-semibold text-white">{log.description}</div>
+                    <div className="mt-2 text-sm text-slate-400">
+                      {log.action} {log.entityId ? `| ${log.entityId}` : ""}
+                    </div>
+                    {log.metadata ? (
+                      <div className="mt-2 text-xs leading-6 text-slate-500">{log.metadata}</div>
+                    ) : null}
+                  </div>
+                  <div className="data-chip">{formatDateTimeLabel(log.createdAt, settings.timezone)}</div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </Drawer>
+
+      <Drawer
         open={selectedTable !== null}
         onClose={() => setSelectedTableId(null)}
         title={selectedTable?.name ?? "Stol tafsiloti"}
@@ -621,6 +863,90 @@ export function DashboardPage() {
       </ResponsiveModal>
 
       <ResponsiveModal
+        open={shiftModal !== null}
+        onClose={resetShiftModal}
+        title={
+          shiftModal === "open"
+            ? "Smenani ochish"
+            : shiftModal === "pause"
+              ? "Smenani pauzaga qo'yish"
+              : shiftModal === "resume"
+                ? "Smenani davom ettirish"
+                : "Smenani yopish"
+        }
+        description={
+          shiftModal === "open"
+            ? "Boshlang'ich naqd summani kiriting va yangi smenani oching."
+            : shiftModal === "pause"
+              ? "Kassa va zal amallarini vaqtincha to'xtatish uchun smenani pauzaga o'tkazing."
+              : shiftModal === "resume"
+                ? "Pauzadagi smenani yana faol holatga qaytaring."
+                : "Yakuniy naqd summani qayd etib, smenani yoping."
+        }
+        tone={shiftModal === "close" ? "amber" : "cyan"}
+        size="md"
+        icon={shiftModal === "close" ? <Square className="h-5 w-5" /> : <WalletCards className="h-5 w-5" />}
+        closeGuard={{ when: shiftModalDirty }}
+        footer={
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <ModalDismissButton variant="secondary" disabled={shiftPending}>
+              Yopish
+            </ModalDismissButton>
+            <Button className="gap-2" onClick={submitShiftAction} disabled={shiftPending}>
+              {shiftPending ? "Saqlanmoqda..." : shiftModal === "close" ? "Smenani yopish" : "Tasdiqlash"}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <ModalStat label="Joriy qoldiq" value={formatCurrency(cashOnHand, settings.currency)} hint="Kassa snapshot" />
+            <ModalStat
+              label="Smena"
+              value={activeShift ? (activeShift.status === "paused" ? "Pauza" : "Faol") : "Yangi"}
+              hint={activeShift ? formatDateTimeLabel(activeShift.openedAt, settings.timezone) : "Ochish kutilmoqda"}
+            />
+            <ModalStat
+              label="Operator"
+              value={operatorRole === "admin" ? "Admin" : "Kassir"}
+              hint={payload.operator.name}
+            />
+          </div>
+          {shiftModal === "open" || shiftModal === "close" ? (
+            <div>
+              <label className="mb-2 block text-sm text-slate-400">
+                {shiftModal === "open" ? "Boshlang'ich naqd" : "Yakuniy naqd"}
+              </label>
+              <Input
+                type="number"
+                min="0"
+                step="1000"
+                value={shiftCashValue}
+                onChange={(event) => setShiftCashValue(event.target.value)}
+              />
+            </div>
+          ) : null}
+          <div>
+            <label className="mb-2 block text-sm text-slate-400">Izoh (ixtiyoriy)</label>
+            <Textarea
+              placeholder="Masalan: kassir tushlikka chiqdi yoki smena topshirilmoqda"
+              value={shiftNote}
+              onChange={(event) => setShiftNote(event.target.value)}
+            />
+          </div>
+          <ModalNote tone={shiftModal === "close" ? "amber" : "cyan"}>
+            {shiftModal === "pause"
+              ? "Pauza audit jurnaliga yoziladi va smena keyin davom ettirilishi mumkin."
+              : shiftModal === "resume"
+                ? "Davom ettirishdan so'ng barcha kundalik amallar yana shu smena ichida yuradi."
+                : shiftModal === "close"
+                  ? "Yakuniy naqd summa smena reconciliation va owner reporting uchun ishlatiladi."
+                  : "Yangi smena ochilgach kassa va billing amallari shu shift kontekstida saqlanadi."}
+          </ModalNote>
+        </div>
+      </ResponsiveModal>
+
+      <ResponsiveModal
         open={kpiModal !== null}
         onClose={() => setKpiModal(null)}
         title={kpiModalCopy?.title ?? "KPI tafsiloti"}
@@ -648,7 +974,7 @@ export function DashboardPage() {
                 <ModalStat
                   label="Billing tuzatishlar"
                   value={`${billAdjustmentsToday}`}
-                  hint={billAdjustmentsAvailable ? "Chegirma, komplement, bepul daqiqa" : "Backend deploy kutilmoqda"}
+                  hint={billAdjustmentsAvailable ? "Qo'lda kiritilgan billing yozuvlari" : "Backend deploy kutilmoqda"}
                 />
               </div>
               <div className="space-y-3">

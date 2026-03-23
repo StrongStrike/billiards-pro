@@ -3,6 +3,7 @@ import "dotenv/config";
 import { hashPassword } from "@/lib/auth/password";
 import { requireDatabase } from "@/lib/db/client";
 import {
+  auditLogs,
   billAdjustments,
   billiardTables,
   cashMovements,
@@ -13,6 +14,8 @@ import {
   productCategories,
   products,
   reservations,
+  shiftEvents,
+  shifts,
   stockMovements,
   tableSessions,
 } from "@/lib/db/schema";
@@ -24,6 +27,12 @@ const seedAdmin = {
   name: process.env.SEED_ADMIN_NAME ?? "Aziz Manager",
 };
 
+const seedCashier = {
+  email: process.env.SEED_CASHIER_EMAIL ?? "kassir@billiards.uz",
+  password: process.env.SEED_CASHIER_PASSWORD ?? "Kassir2026!",
+  name: process.env.SEED_CASHIER_NAME ?? "Timur Kassir",
+};
+
 async function seedDatabase() {
   const db = requireDatabase();
   const dataset = createSeedDataset();
@@ -31,9 +40,11 @@ async function seedDatabase() {
   const normalizedAdminEmail = seedAdmin.email.trim().toLowerCase();
 
   await db.transaction(async (tx) => {
-    await tx.delete(operators);
+    await tx.delete(auditLogs);
+    await tx.delete(shiftEvents);
     await tx.delete(billAdjustments);
     await tx.delete(cashMovements);
+    await tx.delete(shifts);
     await tx.delete(stockMovements);
     await tx.delete(orderItems);
     await tx.delete(orders);
@@ -43,6 +54,7 @@ async function seedDatabase() {
     await tx.delete(productCategories);
     await tx.delete(billiardTables);
     await tx.delete(clubSettings);
+    await tx.delete(operators);
 
     await tx.insert(clubSettings).values({
       id: "club",
@@ -58,6 +70,18 @@ async function seedDatabase() {
       fullName: seedAdmin.name,
       email: normalizedAdminEmail,
       passwordHash: hashPassword(seedAdmin.password),
+      role: "admin",
+      isActive: true,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    await tx.insert(operators).values({
+      id: "operator-cashier",
+      fullName: seedCashier.name,
+      email: seedCashier.email.trim().toLowerCase(),
+      passwordHash: hashPassword(seedCashier.password),
+      role: "cashier",
       isActive: true,
       createdAt: now,
       updatedAt: now,
@@ -149,10 +173,39 @@ async function seedDatabase() {
       })),
     );
 
+    await tx.insert(shifts).values(
+      dataset.shifts.map((shift) => ({
+        id: shift.id,
+        status: shift.status,
+        openingCash: shift.openingCash,
+        closingCash: shift.closingCash ?? null,
+        openedByOperatorId: shift.openedByOperatorId ?? "operator-admin",
+        closedByOperatorId: shift.closedByOperatorId ?? null,
+        note: shift.note ?? null,
+        openedAt: new Date(shift.openedAt),
+        pausedAt: shift.pausedAt ? new Date(shift.pausedAt) : null,
+        closedAt: shift.closedAt ? new Date(shift.closedAt) : null,
+        updatedAt: new Date(shift.updatedAt),
+      })),
+    );
+
+    await tx.insert(shiftEvents).values(
+      dataset.shiftEvents.map((event) => ({
+        id: event.id,
+        shiftId: event.shiftId,
+        operatorId:
+          event.operatorId === "operator-cashier" ? "operator-cashier" : "operator-admin",
+        type: event.type,
+        note: event.note ?? null,
+        createdAt: new Date(event.createdAt),
+      })),
+    );
+
     await tx.insert(cashMovements).values(
       dataset.cashMovements.map((movement) => ({
         ...movement,
-        operatorId: "operator-admin",
+        operatorId: movement.shiftId === "shift-0" ? "operator-cashier" : "operator-admin",
+        shiftId: movement.shiftId ?? null,
         createdAt: new Date(movement.createdAt),
       })),
     );
@@ -160,10 +213,23 @@ async function seedDatabase() {
     await tx.insert(billAdjustments).values(
       dataset.billAdjustments.map((adjustment) => ({
         ...adjustment,
-        operatorId: "operator-admin",
+        operatorId: adjustment.shiftId === "shift-0" ? "operator-cashier" : "operator-admin",
+        shiftId: adjustment.shiftId ?? null,
         amount: adjustment.amount ?? null,
-        minutes: adjustment.minutes ?? null,
         createdAt: new Date(adjustment.createdAt),
+      })),
+    );
+
+    await tx.insert(auditLogs).values(
+      dataset.auditLogs.map((log) => ({
+        id: log.id,
+        operatorId: log.operatorId === "operator-cashier" ? "operator-cashier" : "operator-admin",
+        action: log.action,
+        entityType: log.entityType,
+        entityId: log.entityId ?? null,
+        description: log.description,
+        metadata: log.metadata ?? null,
+        createdAt: new Date(log.createdAt),
       })),
     );
   });

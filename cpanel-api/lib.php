@@ -69,6 +69,7 @@ function api_run(): void
         }
 
         if ($method === 'GET' && $route === '/reports') {
+            api_require_role($operator, ['admin']);
             $range = $_GET['range'] ?? 'day';
             if (!in_array($range, ['day', 'week', 'month', 'year'], true)) {
                 $range = 'day';
@@ -78,17 +79,20 @@ function api_run(): void
         }
 
         if ($method === 'GET' && $route === '/settings') {
+            api_require_role($operator, ['admin']);
             api_json_response(api_get_bootstrap_payload($config, $operator)['settings']);
             return;
         }
 
         if ($method === 'PATCH' && $route === '/settings') {
-            api_update_settings($config, api_request_json());
+            api_require_role($operator, ['admin']);
+            api_update_settings($config, $operator, api_request_json());
             api_json_response(['ok' => true]);
             return;
         }
 
         if ($method === 'GET' && $route === '/inventory') {
+            api_require_role($operator, ['admin']);
             $payload = api_get_bootstrap_payload($config, $operator);
             api_json_response([
                 'products' => $payload['products'],
@@ -98,19 +102,20 @@ function api_run(): void
         }
 
         if ($method === 'PATCH' && $route === '/inventory') {
-            api_update_inventory($config, api_request_json());
+            api_require_role($operator, ['admin']);
+            api_update_inventory($config, $operator, api_request_json());
             api_json_response(['ok' => true]);
             return;
         }
 
         if ($method === 'POST' && $route === '/orders') {
-            api_create_table_order($config, api_request_json());
+            api_create_table_order($config, $operator, api_request_json());
             api_json_response(['ok' => true]);
             return;
         }
 
         if ($method === 'POST' && $route === '/counter-sales') {
-            api_create_counter_sale($config, api_request_json());
+            api_create_counter_sale($config, $operator, api_request_json());
             api_json_response(['ok' => true]);
             return;
         }
@@ -127,14 +132,58 @@ function api_run(): void
             return;
         }
 
+        if ($method === 'GET' && $route === '/shifts/current') {
+            $state = api_load_state($config);
+            api_json_response(['shift' => api_current_shift($state)]);
+            return;
+        }
+
+        if ($method === 'POST' && $route === '/shifts/open') {
+            api_open_shift($config, $operator, api_request_json());
+            api_json_response(['ok' => true]);
+            return;
+        }
+
+        if ($method === 'POST' && $route === '/shifts/pause') {
+            api_pause_shift($config, $operator, api_request_json());
+            api_json_response(['ok' => true]);
+            return;
+        }
+
+        if ($method === 'POST' && $route === '/shifts/resume') {
+            api_resume_shift($config, $operator, api_request_json());
+            api_json_response(['ok' => true]);
+            return;
+        }
+
+        if ($method === 'POST' && $route === '/shifts/close') {
+            api_close_shift($config, $operator, api_request_json());
+            api_json_response(['ok' => true]);
+            return;
+        }
+
+        if ($method === 'GET' && $route === '/audit') {
+            api_require_role($operator, ['admin']);
+            $state = api_load_state($config);
+            api_json_response(['auditLogs' => array_slice($state['auditLogs'], 0, 80)]);
+            return;
+        }
+
+        if ($method === 'PATCH' && preg_match('#^/operators/([^/]+)/role$#', $route, $matches)) {
+            api_require_role($operator, ['admin']);
+            api_update_operator_role($config, $operator, $matches[1], api_request_json());
+            api_json_response(['ok' => true]);
+            return;
+        }
+
         if ($method === 'POST' && $route === '/reservations') {
-            api_create_reservation($config, api_request_json());
+            api_create_reservation($config, $operator, api_request_json());
             api_json_response(['ok' => true]);
             return;
         }
 
         if ($method === 'PATCH' && preg_match('#^/reservations/([^/]+)$#', $route, $matches)) {
-            api_update_reservation($config, $matches[1], api_request_json());
+            api_update_reservation($config, $operator, $matches[1], api_request_json());
             api_json_response(['ok' => true]);
             return;
         }
@@ -149,13 +198,13 @@ function api_run(): void
         }
 
         if ($method === 'POST' && preg_match('#^/tables/([^/]+)/session/start$#', $route, $matches)) {
-            api_start_table_session($config, $matches[1], api_request_json());
+            api_start_table_session($config, $operator, $matches[1], api_request_json());
             api_json_response(['ok' => true]);
             return;
         }
 
         if ($method === 'POST' && preg_match('#^/tables/([^/]+)/session/stop$#', $route, $matches)) {
-            api_stop_table_session($config, $matches[1], api_request_json());
+            api_stop_table_session($config, $operator, $matches[1], api_request_json());
             api_json_response(['ok' => true]);
             return;
         }

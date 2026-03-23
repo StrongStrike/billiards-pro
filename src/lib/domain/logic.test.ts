@@ -65,22 +65,31 @@ describe("club domain logic", () => {
   });
 
   it("builds a timezone-aware range report with daily chart points", () => {
-    const state = createSeedDataset(new Date("2026-03-13T22:00:00.000Z"));
+    const state = createSeedDataset(new Date("2026-03-13T16:30:00.000Z"));
     const report = buildReport({
       range: "day",
-      now: new Date("2026-03-13T22:00:00.000Z"),
+      now: new Date("2026-03-13T16:30:00.000Z"),
       settings: state.settings,
       tables: state.tables,
       sessions: state.sessions,
       orders: state.orders,
       orderItems: state.orderItems,
       products: state.products,
+      categories: state.categories,
+      cashMovements: state.cashMovements,
       billAdjustments: state.billAdjustments,
+      shifts: state.shifts,
+      operators: [
+        { id: "operator-admin", name: "Aziz Manager", email: "admin@billiards.uz", role: "admin", isActive: true },
+        { id: "operator-cashier", name: "Timur Kassir", email: "kassir@billiards.uz", role: "cashier", isActive: true },
+      ],
     });
 
     expect(report.revenue).toBeGreaterThan(0);
     expect(report.chart.length).toBe(24);
     expect(report.currency).toBe("UZS");
+    expect(report.categorySales.length).toBeGreaterThan(0);
+    expect(report.tablePerformance.length).toBeGreaterThan(0);
   });
 
   it("builds dashboard activity from persisted sessions and orders", () => {
@@ -99,7 +108,7 @@ describe("club domain logic", () => {
     expect(chart.some((point) => point.occupancy > 0)).toBe(true);
   });
 
-  it("applies free minutes and discounts to session summary", () => {
+  it("applies manual bill adjustments to session summary", () => {
     const state = createSeedDataset(new Date("2026-03-13T22:00:00.000Z"));
     const session = state.sessions.find((item) => item.id === "session-5");
     expect(session).toBeTruthy();

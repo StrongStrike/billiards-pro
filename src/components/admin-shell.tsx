@@ -25,6 +25,8 @@ export function AdminShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const operatorRole = operator.role ?? "admin";
+  const allowedNavItems = navItems.filter((item) => item.roles.includes(operatorRole));
 
   async function logout() {
     await logoutRequest();
@@ -66,7 +68,7 @@ export function AdminShell({
             </div>
           </div>
           <nav className="flex min-w-0 flex-1 gap-2 overflow-x-auto xl:flex-col xl:overflow-visible">
-            {navItems.map((item) => {
+            {allowedNavItems.map((item) => {
               const active = pathname === item.href;
               const Icon = item.icon;
               return (
@@ -104,7 +106,7 @@ export function AdminShell({
                 <div className="mt-3 font-display text-xl font-semibold text-white">{operator.name}</div>
               </div>
               <div className="rounded-full border border-emerald-300/18 bg-emerald-300/10 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-emerald-200">
-                Faol
+                {operatorRole === "admin" ? "Admin" : "Kassir"}
               </div>
             </div>
             <div className="mt-1 text-sm text-slate-400">{operator.email}</div>

@@ -38,14 +38,8 @@ const EMPTY_BILL_ADJUSTMENTS: BillAdjustment[] = [];
 type TableModal = "start" | "extend" | "adjust" | "order" | "stop" | null;
 
 function getAdjustmentLabel(type: BillAdjustment["type"]) {
-  if (type === "discount") {
-    return "Chegirma";
-  }
-  if (type === "compliment") {
-    return "Komplement";
-  }
-  if (type === "free_minutes") {
-    return "Bepul daqiqa";
+  if (type !== "manual_charge") {
+    return "Eski billing yozuvi";
   }
   return "Qo'lda qo'shilgan summa";
 }
@@ -59,7 +53,7 @@ export function TablesPage() {
   const [productId, setProductId] = useState("");
   const [quantity, setQuantity] = useState("1");
   const [extendMinutes, setExtendMinutes] = useState("30");
-  const [adjustmentType, setAdjustmentType] = useState<BillAdjustment["type"]>("discount");
+  const [adjustmentType, setAdjustmentType] = useState<BillAdjustment["type"]>("manual_charge");
   const [adjustmentValue, setAdjustmentValue] = useState("30000");
   const [adjustmentReason, setAdjustmentReason] = useState("");
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -79,7 +73,7 @@ export function TablesPage() {
   function closeModal() {
     setActiveModal(null);
     setExtendMinutes("30");
-    setAdjustmentType("discount");
+    setAdjustmentType("manual_charge");
     setAdjustmentValue("30000");
     setAdjustmentReason("");
   }
@@ -176,18 +170,15 @@ export function TablesPage() {
     () =>
       selectedSessionAdjustments.map((adjustment) => ({
         label: getAdjustmentLabel(adjustment.type),
-        value:
-          adjustment.type === "free_minutes"
-            ? `-${adjustment.minutes ?? 0} daqiqa`
-            : `${adjustment.type === "manual_charge" ? "+" : "-"}${formatCurrency(adjustment.amount ?? 0, settings?.currency ?? "UZS")}`,
-        reason: adjustment.reason,
+        value: `${(adjustment.amount ?? 0) >= 0 ? "+" : "-"}${formatCurrency(Math.abs(adjustment.amount ?? 0), settings?.currency ?? "UZS")}`,
+        reason: adjustment.reason ?? "Izoh kiritilmagan",
       })),
     [selectedSessionAdjustments, settings?.currency],
   );
   const startModalDirty = startCustomer.trim() !== "" || startNote.trim() !== "";
   const extendModalDirty = extendMinutes !== "30";
   const adjustModalDirty =
-    adjustmentReason.trim() !== "" || adjustmentValue !== "30000" || adjustmentType !== "discount";
+    adjustmentReason.trim() !== "" || adjustmentValue !== "30000" || adjustmentType !== "manual_charge";
   const orderModalDirty = productId !== "" || quantity !== "1";
 
   if (bootstrapQuery.isPending || !bootstrapQuery.data || !settings) {
@@ -218,9 +209,9 @@ export function TablesPage() {
             selectedTable.pendingOrderTotal > 0
               ? `Bar buyurtma: ${formatCurrency(selectedTable.pendingOrderTotal, settings.currency)}`
               : "Bar buyurtma yo'q",
-            selectedTable.currentSummary.freeMinutes > 0
-              ? `Bepul daqiqa: ${selectedTable.currentSummary.freeMinutes}`
-              : "Bepul daqiqa qo'llanmagan",
+            selectedSessionAdjustments.length > 0
+              ? `${selectedSessionAdjustments.length} ta billing tuzatishi qo'llangan`
+              : "Billing tuzatishi qo'llanmagan",
           ],
           footerNote: "Yakuniy stol cheki termal printer uchun tayyor.",
         } satisfies PrintableReceipt)
@@ -459,7 +450,7 @@ export function TablesPage() {
                 )}
                 {!billAdjustmentsSupportAvailable ? (
                   <ModalNote tone="slate">
-                    Billing tuzatishlari yangi backend qatlamida ishlaydi. PHP API yangilangach chegirma, komplement va bepul daqiqa shu drawer ichida faol bo&#39;ladi.
+                    Billing tuzatishlari yangi backend qatlamida ishlaydi. PHP API yangilangach shu drawer ichida faqat qo&#39;lda `+/-` summa yozuvi faol bo&#39;ladi.
                   </ModalNote>
                 ) : null}
 
@@ -508,9 +499,7 @@ export function TablesPage() {
                       {formatCurrency(selectedTable.currentSummary?.adjustmentAmount ?? 0, settings.currency)}
                     </div>
                     <div className="mt-2 text-sm text-slate-400">
-                      {selectedTable.currentSummary?.freeMinutes
-                        ? `${selectedTable.currentSummary.freeMinutes} daqiqa bepul`
-                        : `${selectedSessionAdjustments.length} ta adjustment`}
+                      {selectedSessionAdjustments.length} ta adjustment
                     </div>
                   </div>
                 </div>
@@ -547,7 +536,7 @@ export function TablesPage() {
                 <div className="rounded-[24px] border border-white/8 bg-white/[0.03] p-4">
                   <div className="font-semibold text-white">Billing tuzatishlari</div>
                   <div className="mt-2 text-sm text-slate-400">
-                    Chegirma, komplement, bepul daqiqa va qo&#39;lda qo&#39;shilgan summa shu jurnal orqali checkout ichiga kiradi.
+                    Qo&#39;lda kiritilgan billing tuzatishlari shu jurnal orqali checkout ichiga kiradi.
                   </div>
 
                   <div className="mt-4 space-y-2">
@@ -563,24 +552,14 @@ export function TablesPage() {
                         >
                           <div>
                             <div className="font-medium text-white">
-                              {adjustment.type === "discount"
-                                ? "Chegirma"
-                                : adjustment.type === "compliment"
-                                  ? "Komplement"
-                                  : adjustment.type === "free_minutes"
-                                    ? "Bepul daqiqa"
-                                    : "Qo&apos;lda qo&apos;shish"}
+                              {getAdjustmentLabel(adjustment.type)}
                             </div>
-                            <div className="mt-1 text-slate-400">{adjustment.reason}</div>
+                            <div className="mt-1 text-slate-400">{adjustment.reason ?? "Izoh kiritilmagan"}</div>
                           </div>
                           <div className="text-right">
                             <div className="font-semibold text-white">
-                              {adjustment.type === "free_minutes"
-                                ? `${adjustment.minutes ?? 0} daqiqa`
-                                : `${adjustment.type === "manual_charge" ? "+" : "-"}${formatCurrency(
-                                    adjustment.amount ?? 0,
-                                    settings.currency,
-                                  )}`}
+                              {(adjustment.amount ?? 0) >= 0 ? "+" : "-"}
+                              {formatCurrency(Math.abs(adjustment.amount ?? 0), settings.currency)}
                             </div>
                             <div className="mt-1 text-xs uppercase tracking-[0.22em] text-slate-500">
                               {formatClock(adjustment.createdAt, settings.timezone)}
@@ -834,7 +813,7 @@ export function TablesPage() {
             open={activeModal === "adjust" && Boolean(selectedTable.activeSession)}
             onClose={closeModal}
             title={`${selectedTable.name} billing tuzatishi`}
-            description="Chegirma, komplement, bepul daqiqa yoki qo&#39;lda qo&#39;shimcha summani majburiy izoh bilan kiriting. Tuzatish checkout va hisobotlarga qo&#39;shiladi."
+            description="Yakuniy hisobga qo&#39;lda `+/-` summa kiriting. Izoh ixtiyoriy, tuzatish checkout va hisobotlarga qo&#39;shiladi."
             tone="green"
             icon={<WalletCards className="h-5 w-5" />}
             closeGuard={{ when: adjustModalDirty }}
@@ -875,24 +854,17 @@ export function TablesPage() {
                     if (!selectedTable.activeSession?.id) {
                       throw new Error("Faol seans topilmadi");
                     }
-                    if (!adjustmentReason.trim()) {
-                      throw new Error("Majburiy izohni kiriting");
+                    const value = Number(adjustmentValue);
+                    if (!Number.isInteger(value) || value === 0) {
+                      throw new Error("Nol bo'lmagan summani kiriting");
                     }
 
-                    const payload =
-                      adjustmentType === "free_minutes"
-                        ? {
-                            sessionId: selectedTable.activeSession.id,
-                            type: adjustmentType,
-                            minutes: Number(adjustmentValue),
-                            reason: adjustmentReason,
-                          }
-                        : {
-                            sessionId: selectedTable.activeSession.id,
-                            type: adjustmentType,
-                            amount: Number(adjustmentValue),
-                            reason: adjustmentReason,
-                          };
+                    const payload = {
+                      sessionId: selectedTable.activeSession.id,
+                      type: "manual_charge" as const,
+                      amount: value,
+                      reason: adjustmentReason,
+                    };
 
                     await postJson("/api/bill-adjustments", payload);
                   },
@@ -913,11 +885,7 @@ export function TablesPage() {
                 <ModalStat
                   label="Joriy tuzatish"
                   value={formatCurrency(selectedTable.currentSummary?.adjustmentAmount ?? 0, settings.currency)}
-                  hint={
-                    selectedTable.currentSummary?.freeMinutes
-                      ? `${selectedTable.currentSummary.freeMinutes} bepul daqiqa`
-                      : "Tuzatish jurnalidan"
-                  }
+                  hint="Tuzatish jurnalidan"
                 />
                 <ModalStat
                   label="Yakuniy chek"
@@ -926,31 +894,25 @@ export function TablesPage() {
                 />
               </div>
 
-              <div className="grid gap-4 md:grid-cols-[220px_160px]">
-                <div>
+                <div className="grid gap-4 md:grid-cols-[220px_160px]">
+                  <div>
                   <label className="mb-2 block text-sm text-slate-400">Tuzatish turi</label>
                   <Select
                     value={adjustmentType}
                     onChange={(event) => {
                       const nextType = event.target.value as BillAdjustment["type"];
                       setAdjustmentType(nextType);
-                      setAdjustmentValue(nextType === "free_minutes" ? "15" : "30000");
+                      setAdjustmentValue("30000");
                     }}
                   >
-                    <option value="discount">Chegirma</option>
-                    <option value="compliment">Komplement</option>
-                    <option value="free_minutes">Bepul daqiqa</option>
-                    <option value="manual_charge">Qo&apos;lda qo&apos;shish</option>
+                    <option value="manual_charge">Qo&apos;lda tuzatish</option>
                   </Select>
                 </div>
                 <div>
-                  <label className="mb-2 block text-sm text-slate-400">
-                    {adjustmentType === "free_minutes" ? "Daqiqa" : "Summa"}
-                  </label>
+                  <label className="mb-2 block text-sm text-slate-400">Summa</label>
                   <Input
                     type="number"
-                    min="1"
-                    step={adjustmentType === "free_minutes" ? "5" : "1000"}
+                    step="1000"
                     value={adjustmentValue}
                     onChange={(event) => setAdjustmentValue(event.target.value)}
                   />
@@ -958,20 +920,16 @@ export function TablesPage() {
               </div>
 
               <div>
-                <label className="mb-2 block text-sm text-slate-400">Majburiy izoh</label>
+                <label className="mb-2 block text-sm text-slate-400">Izoh (ixtiyoriy)</label>
                 <Input
-                  placeholder="Masalan: doimiy mijoz, servis xatosi yoki klub komplimenti"
+                  placeholder="Masalan: kassir qo'lda tuzatdi"
                   value={adjustmentReason}
                   onChange={(event) => setAdjustmentReason(event.target.value)}
                 />
               </div>
 
               <ModalNote tone="green">
-                {adjustmentType === "free_minutes"
-                  ? "Bepul daqiqa faqat o'yin summasidan ayriladi."
-                  : adjustmentType === "manual_charge"
-                    ? "Qo'lda qo'shilgan summa yakuniy chekni oshiradi."
-                    : "Chegirma va komplement yakuniy chekni kamaytiradi."}
+                Musbat summa yakuniy chekni oshiradi, manfiy summa esa kamaytiradi.
               </ModalNote>
             </form>
           </ResponsiveModal>

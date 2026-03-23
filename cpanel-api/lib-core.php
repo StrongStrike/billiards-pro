@@ -221,14 +221,8 @@ function api_session_overlap_minutes(array $session, DateTimeImmutable $start, D
 
 function api_calculate_game_charge(array $session, ?string $endIso = null): int
 {
-    return api_calculate_game_charge_with_free_minutes($session, $endIso, 0);
-}
-
-function api_calculate_game_charge_with_free_minutes(array $session, ?string $endIso = null, int $freeMinutes = 0): int
-{
     $durationMinutes = api_difference_minutes($session['startedAt'], $session['endedAt'] ?? ($endIso ?? gmdate(DATE_ATOM)));
-    $billableMinutes = max($durationMinutes - $freeMinutes, 0);
-    return (int) round(($session['hourlyRateSnapshot'] * $billableMinutes) / 60);
+    return (int) round(($session['hourlyRateSnapshot'] * $durationMinutes) / 60);
 }
 
 function api_calculate_order_items_total(array $items): int
@@ -350,19 +344,12 @@ function api_get_session_bill_adjustments(string $sessionId, array $billAdjustme
 
 function api_summarize_bill_adjustments(array $adjustments): array
 {
-    $summary = ['adjustmentAmount' => 0, 'freeMinutes' => 0];
+    $summary = ['adjustmentAmount' => 0];
 
     foreach ($adjustments as $adjustment) {
-        if ($adjustment['type'] === 'free_minutes') {
-            $summary['freeMinutes'] += (int) ($adjustment['minutes'] ?? 0);
-            continue;
-        }
-
         $amount = (int) ($adjustment['amount'] ?? 0);
         if ($adjustment['type'] === 'manual_charge') {
             $summary['adjustmentAmount'] += $amount;
-        } else {
-            $summary['adjustmentAmount'] -= $amount;
         }
     }
 
@@ -373,8 +360,8 @@ function api_calculate_session_summary(array $session, int $orderTotal, array $b
 {
     $durationMinutes = api_difference_minutes($session['startedAt'], $session['endedAt'] ?? ($endIso ?? gmdate(DATE_ATOM)));
     $adjustmentSummary = api_summarize_bill_adjustments($billAdjustments);
-    $baseGameCharge = api_calculate_game_charge_with_free_minutes($session, $endIso, 0);
-    $gameCharge = api_calculate_game_charge_with_free_minutes($session, $endIso, (int) $adjustmentSummary['freeMinutes']);
+    $baseGameCharge = api_calculate_game_charge($session, $endIso);
+    $gameCharge = api_calculate_game_charge($session, $endIso);
     $total = max($gameCharge + $orderTotal + (int) $adjustmentSummary['adjustmentAmount'], 0);
 
     return [
@@ -384,6 +371,5 @@ function api_calculate_session_summary(array $session, int $orderTotal, array $b
         'adjustmentAmount' => (int) $adjustmentSummary['adjustmentAmount'],
         'total' => $total,
         'durationMinutes' => $durationMinutes,
-        'freeMinutes' => (int) $adjustmentSummary['freeMinutes'],
     ];
 }

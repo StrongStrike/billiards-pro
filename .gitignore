@@ -33,6 +33,7 @@ yarn-error.log*
 .pnpm-debug.log*
 .codex-dev.log
 .next-start.log
+.next-dev.log
 src/features.rar
 src/features.zip
 

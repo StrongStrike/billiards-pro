@@ -1,6 +1,6 @@
-import { createBillAdjustment } from "@/lib/server/club-service";
+import { pauseShift } from "@/lib/server/club-service";
 import { handleApiError, ok, requireApiRole } from "@/lib/server/api";
-import { billAdjustmentSchema } from "@/lib/validations";
+import { shiftPauseSchema } from "@/lib/validations";
 
 export async function POST(request: Request) {
   const access = await requireApiRole(["admin", "cashier"]);
@@ -9,8 +9,8 @@ export async function POST(request: Request) {
   }
 
   try {
-    const payload = billAdjustmentSchema.parse(await request.json());
-    await createBillAdjustment({
+    const payload = shiftPauseSchema.parse(await request.json());
+    await pauseShift({
       ...payload,
       operatorId: access.session.id,
     });

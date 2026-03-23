@@ -2,7 +2,51 @@
 
 declare(strict_types=1);
 
-function api_start_table_session(array $config, string $tableId, array $input): void
+function api_append_audit_log(PDO $pdo, array $input): void
+{
+    api_execute(
+        $pdo,
+        'insert into audit_logs (id, operator_id, action, entity_type, entity_id, description, metadata, created_at)
+         values (:id, :operator_id, :action, :entity_type, :entity_id, :description, :metadata, :created_at)',
+        [
+            'id' => api_create_id('audit'),
+            'operator_id' => $input['operatorId'] ?? null,
+            'action' => $input['action'],
+            'entity_type' => $input['entityType'],
+            'entity_id' => $input['entityId'] ?? null,
+            'description' => $input['description'],
+            'metadata' => isset($input['metadata']) ? json_encode($input['metadata'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null,
+            'created_at' => gmdate(DATE_ATOM),
+        ]
+    );
+}
+
+function api_append_shift_event(PDO $pdo, array $input): void
+{
+    api_execute(
+        $pdo,
+        'insert into shift_events (id, shift_id, operator_id, type, note, created_at)
+         values (:id, :shift_id, :operator_id, :type, :note, :created_at)',
+        [
+            'id' => api_create_id('shift-event'),
+            'shift_id' => $input['shiftId'],
+            'operator_id' => $input['operatorId'] ?? null,
+            'type' => $input['type'],
+            'note' => $input['note'] ?? null,
+            'created_at' => gmdate(DATE_ATOM),
+        ]
+    );
+}
+
+function api_fetch_current_shift_row(PDO $pdo): ?array
+{
+    return api_fetch_one(
+        $pdo,
+        "select * from shifts where status in ('open', 'paused') order by opened_at desc limit 1"
+    );
+}
+
+function api_start_table_session(array $config, array $operator, string $tableId, array $input): void
 {
     $customerName = trim((string) ($input['customerName'] ?? ''));
     $note = trim((string) ($input['note'] ?? ''));
@@ -29,12 +73,13 @@ function api_start_table_session(array $config, string $tableId, array $input): 
         }
 
         $now = gmdate(DATE_ATOM);
+        $sessionId = api_create_id('session');
         api_execute(
             $pdo,
             'insert into table_sessions (id, table_id, customer_name, note, started_at, hourly_rate_snapshot, status, created_at, updated_at)
              values (:id, :table_id, :customer_name, :note, :started_at, :hourly_rate_snapshot, :status, :created_at, :updated_at)',
             [
-                'id' => api_create_id('session'),
+                'id' => $sessionId,
                 'table_id' => $tableId,
                 'customer_name' => $customerName,
                 'note' => $note !== '' ? $note : null,
@@ -45,6 +90,14 @@ function api_start_table_session(array $config, string $tableId, array $input): 
                 'updated_at' => $now,
             ]
         );
+        api_append_audit_log($pdo, [
+            'operatorId' => $operator['id'] ?? null,
+            'action' => 'session.started',
+            'entityType' => 'session',
+            'entityId' => $sessionId,
+            'description' => $tableRow['name'] . ' uchun yangi seans boshlandi',
+            'metadata' => ['tableId' => $tableId, 'customerName' => $customerName],
+        ]);
 
         $pdo->commit();
     } catch (Throwable $exception) {
@@ -53,7 +106,7 @@ function api_start_table_session(array $config, string $tableId, array $input): 
     }
 }
 
-function api_stop_table_session(array $config, string $tableId, array $input): void
+function api_stop_table_session(array $config, array $operator, string $tableId, array $input): void
 {
     $pdo = api_pdo($config);
     $pdo->beginTransaction();
@@ -158,6 +211,14 @@ function api_stop_table_session(array $config, string $tableId, array $input): v
             "update reservations set status = 'completed', updated_at = :updated_at where session_id = :session_id",
             ['updated_at' => $settledAt, 'session_id' => $activeSessionRow['id']]
         );
+        api_append_audit_log($pdo, [
+            'operatorId' => $operator['id'] ?? null,
+            'action' => 'session.stopped',
+            'entityType' => 'session',
+            'entityId' => $activeSessionRow['id'],
+            'description' => $activeSessionRow['customer_name'] . ' seansi yopildi',
+            'metadata' => ['tableId' => $tableId, 'settledAt' => $settledAt],
+        ]);
 
         $pdo->commit();
     } catch (Throwable $exception) {
@@ -166,7 +227,7 @@ function api_stop_table_session(array $config, string $tableId, array $input): v
     }
 }
 
-function api_create_table_order(array $config, array $input): void
+function api_create_table_order(array $config, array $operator, array $input): void
 {
     $items = $input['items'] ?? [];
     if (!is_array($items) || count($items) < 1) {
@@ -275,6 +336,19 @@ function api_create_table_order(array $config, array $input): void
             );
         }
 
+        api_append_audit_log($pdo, [
+            'operatorId' => $operator['id'] ?? null,
+            'action' => 'order.table.created',
+            'entityType' => 'order',
+            'entityId' => $orderId,
+            'description' => 'Stol uchun bar buyurtmasi saqlandi',
+            'metadata' => [
+                'tableId' => $activeSessionRow['table_id'],
+                'sessionId' => $activeSessionRow['id'],
+                'items' => count($normalizedItems),
+            ],
+        ]);
+
         $pdo->commit();
     } catch (Throwable $exception) {
         $pdo->rollBack();
@@ -282,7 +356,7 @@ function api_create_table_order(array $config, array $input): void
     }
 }
 
-function api_create_counter_sale(array $config, array $input): void
+function api_create_counter_sale(array $config, array $operator, array $input): void
 {
     $items = $input['items'] ?? [];
     if (!is_array($items) || count($items) < 1) {
@@ -392,6 +466,18 @@ function api_create_counter_sale(array $config, array $input): void
             );
         }
 
+        api_append_audit_log($pdo, [
+            'operatorId' => $operator['id'] ?? null,
+            'action' => 'order.counter.created',
+            'entityType' => 'order',
+            'entityId' => $orderId,
+            'description' => 'Kassa savdosi rasmiylashtirildi',
+            'metadata' => [
+                'customerName' => $customerName !== '' ? $customerName : null,
+                'items' => count($normalizedItems),
+            ],
+        ]);
+
         $pdo->commit();
     } catch (Throwable $exception) {
         $pdo->rollBack();
@@ -418,19 +504,34 @@ function api_create_cash_movement(array $config, array $operator, array $input):
     }
 
     $pdo = api_pdo($config);
+    $currentShift = api_fetch_current_shift_row($pdo);
+    $cashId = api_create_id('cash');
     api_execute(
         $pdo,
-        'insert into cash_movements (id, operator_id, type, amount, reason, created_at)
-         values (:id, :operator_id, :type, :amount, :reason, :created_at)',
+        'insert into cash_movements (id, operator_id, shift_id, type, amount, reason, created_at)
+         values (:id, :operator_id, :shift_id, :type, :amount, :reason, :created_at)',
         [
-            'id' => api_create_id('cash'),
+            'id' => $cashId,
             'operator_id' => $operator['id'] ?? null,
+            'shift_id' => $currentShift['id'] ?? null,
             'type' => $type,
             'amount' => $amount,
             'reason' => $reason,
             'created_at' => gmdate(DATE_ATOM),
         ]
     );
+    api_append_audit_log($pdo, [
+        'operatorId' => $operator['id'] ?? null,
+        'action' => 'cash.movement.created',
+        'entityType' => 'cash',
+        'entityId' => $cashId,
+        'description' => 'Kassa harakati saqlandi',
+        'metadata' => [
+            'type' => $type,
+            'amount' => $amount,
+            'shiftId' => $currentShift['id'] ?? null,
+        ],
+    ]);
 }
 
 function api_create_bill_adjustment(array $config, array $operator, array $input): void
@@ -438,27 +539,18 @@ function api_create_bill_adjustment(array $config, array $operator, array $input
     $sessionId = (string) ($input['sessionId'] ?? '');
     $type = (string) ($input['type'] ?? '');
     $amount = array_key_exists('amount', $input) ? (int) $input['amount'] : null;
-    $minutes = array_key_exists('minutes', $input) ? (int) $input['minutes'] : null;
     $reason = trim((string) ($input['reason'] ?? ''));
 
     if ($sessionId === '') {
         throw new ApiException(400, 'Seans topilmadi');
     }
 
-    if (!in_array($type, ['discount', 'compliment', 'free_minutes', 'manual_charge'], true)) {
+    if ($type !== 'manual_charge') {
         throw new ApiException(400, "Billing tuzatish turi noto'g'ri");
     }
 
-    if ($type === 'free_minutes') {
-        if ($minutes === null || $minutes <= 0) {
-            throw new ApiException(400, "Bepul daqiqa miqdorini kiriting");
-        }
-    } elseif ($amount === null || $amount <= 0) {
-        throw new ApiException(400, "Summani kiriting");
-    }
-
-    if (mb_strlen($reason) < 4) {
-        throw new ApiException(400, "Izoh kamida 4 belgidan iborat bo'lishi kerak");
+    if ($amount === null || $amount === 0) {
+        throw new ApiException(400, "Nol bo'lmagan summani kiriting");
     }
 
     $pdo = api_pdo($config);
@@ -471,24 +563,196 @@ function api_create_bill_adjustment(array $config, array $operator, array $input
         throw new ApiException(400, 'Faol seans topilmadi');
     }
 
+    $currentShift = api_fetch_current_shift_row($pdo);
+    $adjustmentId = api_create_id('adjustment');
+
     api_execute(
         $pdo,
-        'insert into bill_adjustments (id, session_id, operator_id, type, amount, minutes, reason, created_at)
-         values (:id, :session_id, :operator_id, :type, :amount, :minutes, :reason, :created_at)',
+        'insert into bill_adjustments (id, session_id, operator_id, shift_id, type, amount, minutes, reason, created_at)
+         values (:id, :session_id, :operator_id, :shift_id, :type, :amount, :minutes, :reason, :created_at)',
         [
-            'id' => api_create_id('adjustment'),
+            'id' => $adjustmentId,
             'session_id' => $sessionId,
             'operator_id' => $operator['id'] ?? null,
+            'shift_id' => $currentShift['id'] ?? null,
             'type' => $type,
             'amount' => $amount,
-            'minutes' => $minutes,
-            'reason' => $reason,
+            'minutes' => null,
+            'reason' => $reason !== '' ? $reason : null,
             'created_at' => gmdate(DATE_ATOM),
         ]
     );
+    api_append_audit_log($pdo, [
+        'operatorId' => $operator['id'] ?? null,
+        'action' => 'bill.adjustment.created',
+        'entityType' => 'bill',
+        'entityId' => $adjustmentId,
+        'description' => "Qo'lda billing tuzatishi qo'shildi",
+        'metadata' => [
+            'amount' => $amount,
+            'sessionId' => $sessionId,
+            'shiftId' => $currentShift['id'] ?? null,
+        ],
+    ]);
 }
 
-function api_create_reservation(array $config, array $input): void
+function api_open_shift(array $config, array $operator, array $input): void
+{
+    $openingCash = (int) ($input['openingCash'] ?? 0);
+    $note = trim((string) ($input['note'] ?? ''));
+    if ($openingCash < 0) {
+        throw new ApiException(400, "Boshlang'ich naqd manfiy bo'lishi mumkin emas");
+    }
+
+    $pdo = api_pdo($config);
+    if (api_fetch_current_shift_row($pdo)) {
+        throw new ApiException(400, "Avval joriy smenani yoping yoki davom ettiring");
+    }
+
+    $shiftId = api_create_id('shift');
+    $now = gmdate(DATE_ATOM);
+    api_execute(
+        $pdo,
+        'insert into shifts (id, status, opening_cash, opened_by_operator_id, note, opened_at, updated_at)
+         values (:id, :status, :opening_cash, :opened_by_operator_id, :note, :opened_at, :updated_at)',
+        [
+            'id' => $shiftId,
+            'status' => 'open',
+            'opening_cash' => $openingCash,
+            'opened_by_operator_id' => $operator['id'] ?? null,
+            'note' => $note !== '' ? $note : null,
+            'opened_at' => $now,
+            'updated_at' => $now,
+        ]
+    );
+    api_append_shift_event($pdo, [
+        'shiftId' => $shiftId,
+        'operatorId' => $operator['id'] ?? null,
+        'type' => 'opened',
+        'note' => $note !== '' ? $note : null,
+    ]);
+    api_append_audit_log($pdo, [
+        'operatorId' => $operator['id'] ?? null,
+        'action' => 'shift.opened',
+        'entityType' => 'shift',
+        'entityId' => $shiftId,
+        'description' => 'Smena ochildi',
+        'metadata' => ['openingCash' => $openingCash],
+    ]);
+}
+
+function api_pause_shift(array $config, array $operator, array $input): void
+{
+    $note = trim((string) ($input['note'] ?? ''));
+    $pdo = api_pdo($config);
+    $currentShift = api_fetch_current_shift_row($pdo);
+    if (!$currentShift || $currentShift['status'] !== 'open') {
+        throw new ApiException(400, "Faol smenani pauzaga qo'yish mumkin");
+    }
+
+    $now = gmdate(DATE_ATOM);
+    api_execute(
+        $pdo,
+        "update shifts set status = 'paused', paused_at = :paused_at, note = :note, updated_at = :updated_at where id = :id",
+        [
+            'paused_at' => $now,
+            'note' => $note !== '' ? $note : ($currentShift['note'] ?: null),
+            'updated_at' => $now,
+            'id' => $currentShift['id'],
+        ]
+    );
+    api_append_shift_event($pdo, [
+        'shiftId' => $currentShift['id'],
+        'operatorId' => $operator['id'] ?? null,
+        'type' => 'paused',
+        'note' => $note !== '' ? $note : null,
+    ]);
+    api_append_audit_log($pdo, [
+        'operatorId' => $operator['id'] ?? null,
+        'action' => 'shift.paused',
+        'entityType' => 'shift',
+        'entityId' => $currentShift['id'],
+        'description' => "Smena pauzaga qo'yildi",
+    ]);
+}
+
+function api_resume_shift(array $config, array $operator, array $input): void
+{
+    $note = trim((string) ($input['note'] ?? ''));
+    $pdo = api_pdo($config);
+    $currentShift = api_fetch_current_shift_row($pdo);
+    if (!$currentShift || $currentShift['status'] !== 'paused') {
+        throw new ApiException(400, 'Pauzadagi smenani davom ettirish mumkin');
+    }
+
+    $now = gmdate(DATE_ATOM);
+    api_execute(
+        $pdo,
+        "update shifts set status = 'open', paused_at = null, updated_at = :updated_at where id = :id",
+        [
+            'updated_at' => $now,
+            'id' => $currentShift['id'],
+        ]
+    );
+    api_append_shift_event($pdo, [
+        'shiftId' => $currentShift['id'],
+        'operatorId' => $operator['id'] ?? null,
+        'type' => 'resumed',
+        'note' => $note !== '' ? $note : null,
+    ]);
+    api_append_audit_log($pdo, [
+        'operatorId' => $operator['id'] ?? null,
+        'action' => 'shift.resumed',
+        'entityType' => 'shift',
+        'entityId' => $currentShift['id'],
+        'description' => 'Smena davom ettirildi',
+    ]);
+}
+
+function api_close_shift(array $config, array $operator, array $input): void
+{
+    $closingCash = (int) ($input['closingCash'] ?? -1);
+    $note = trim((string) ($input['note'] ?? ''));
+    if ($closingCash < 0) {
+        throw new ApiException(400, "Yakuniy naqd manfiy bo'lishi mumkin emas");
+    }
+
+    $pdo = api_pdo($config);
+    $currentShift = api_fetch_current_shift_row($pdo);
+    if (!$currentShift) {
+        throw new ApiException(400, 'Yopish uchun faol smena topilmadi');
+    }
+
+    $now = gmdate(DATE_ATOM);
+    api_execute(
+        $pdo,
+        "update shifts set status = 'closed', closing_cash = :closing_cash, closed_by_operator_id = :closed_by_operator_id, closed_at = :closed_at, note = :note, updated_at = :updated_at where id = :id",
+        [
+            'closing_cash' => $closingCash,
+            'closed_by_operator_id' => $operator['id'] ?? null,
+            'closed_at' => $now,
+            'note' => $note !== '' ? $note : ($currentShift['note'] ?: null),
+            'updated_at' => $now,
+            'id' => $currentShift['id'],
+        ]
+    );
+    api_append_shift_event($pdo, [
+        'shiftId' => $currentShift['id'],
+        'operatorId' => $operator['id'] ?? null,
+        'type' => 'closed',
+        'note' => $note !== '' ? $note : null,
+    ]);
+    api_append_audit_log($pdo, [
+        'operatorId' => $operator['id'] ?? null,
+        'action' => 'shift.closed',
+        'entityType' => 'shift',
+        'entityId' => $currentShift['id'],
+        'description' => 'Smena yopildi',
+        'metadata' => ['closingCash' => $closingCash],
+    ]);
+}
+
+function api_create_reservation(array $config, array $operator, array $input): void
 {
     $tableId = (string) ($input['tableId'] ?? '');
     $customerName = trim((string) ($input['customerName'] ?? ''));
@@ -518,12 +782,13 @@ function api_create_reservation(array $config, array $input): void
         }
 
         $now = gmdate(DATE_ATOM);
+        $reservationId = api_create_id('reservation');
         api_execute(
             $pdo,
             'insert into reservations (id, table_id, customer_name, phone, guests, note, start_at, end_at, status, created_at, updated_at)
              values (:id, :table_id, :customer_name, :phone, :guests, :note, :start_at, :end_at, :status, :created_at, :updated_at)',
             [
-                'id' => api_create_id('reservation'),
+                'id' => $reservationId,
                 'table_id' => $tableId,
                 'customer_name' => $customerName,
                 'phone' => $phone,
@@ -536,6 +801,14 @@ function api_create_reservation(array $config, array $input): void
                 'updated_at' => $now,
             ]
         );
+        api_append_audit_log($pdo, [
+            'operatorId' => $operator['id'] ?? null,
+            'action' => 'reservation.created',
+            'entityType' => 'reservation',
+            'entityId' => $reservationId,
+            'description' => 'Yangi bron yaratildi',
+            'metadata' => ['tableId' => $tableId, 'customerName' => $customerName],
+        ]);
 
         $pdo->commit();
     } catch (Throwable $exception) {
@@ -544,7 +817,7 @@ function api_create_reservation(array $config, array $input): void
     }
 }
 
-function api_update_reservation(array $config, string $reservationId, array $input): void
+function api_update_reservation(array $config, array $operator, string $reservationId, array $input): void
 {
     $pdo = api_pdo($config);
     $pdo->beginTransaction();
@@ -634,6 +907,17 @@ function api_update_reservation(array $config, string $reservationId, array $inp
                 'id' => $reservationId,
             ]
         );
+        api_append_audit_log($pdo, [
+            'operatorId' => $operator['id'] ?? null,
+            'action' => !empty($input['convertToSession']) ? 'reservation.converted' : 'reservation.updated',
+            'entityType' => 'reservation',
+            'entityId' => $reservationId,
+            'description' => !empty($input['convertToSession']) ? "Bron faol seansga aylantirildi" : 'Bron yangilandi',
+            'metadata' => [
+                'status' => $nextReservation['status'],
+                'sessionId' => $sessionId,
+            ],
+        ]);
 
         $pdo->commit();
     } catch (Throwable $exception) {
@@ -642,7 +926,7 @@ function api_update_reservation(array $config, string $reservationId, array $inp
     }
 }
 
-function api_update_settings(array $config, array $input): void
+function api_update_settings(array $config, array $operator, array $input): void
 {
     $pdo = api_pdo($config);
     $pdo->beginTransaction();
@@ -702,6 +986,18 @@ function api_update_settings(array $config, array $input): void
             }
         }
 
+        api_append_audit_log($pdo, [
+            'operatorId' => $operator['id'] ?? null,
+            'action' => 'settings.updated',
+            'entityType' => 'settings',
+            'entityId' => $settingsRow['id'],
+            'description' => 'Klub sozlamalari yangilandi',
+            'metadata' => [
+                'clubName' => trim((string) ($input['clubName'] ?? $settingsRow['club_name'])) ?: $settingsRow['club_name'],
+                'tablesUpdated' => is_array($input['tables'] ?? null) ? count($input['tables']) : 0,
+            ],
+        ]);
+
         $pdo->commit();
     } catch (Throwable $exception) {
         $pdo->rollBack();
@@ -709,7 +1005,7 @@ function api_update_settings(array $config, array $input): void
     }
 }
 
-function api_update_inventory(array $config, array $input): void
+function api_update_inventory(array $config, array $operator, array $input): void
 {
     $action = (string) ($input['action'] ?? '');
     $productId = (string) ($input['productId'] ?? '');
@@ -742,6 +1038,18 @@ function api_update_inventory(array $config, array $input): void
                     'id' => $productId,
                 ]
             );
+            api_append_audit_log($pdo, [
+                'operatorId' => $operator['id'] ?? null,
+                'action' => 'inventory.product.updated',
+                'entityType' => 'inventory',
+                'entityId' => $productId,
+                'description' => $product['name'] . ' mahsuloti yangilandi',
+                'metadata' => [
+                    'price' => (int) ($input['price'] ?? $product['price']),
+                    'stock' => (int) ($input['stock'] ?? $product['stock']),
+                    'isActive' => array_key_exists('isActive', $input) ? (bool) $input['isActive'] : $product['isActive'],
+                ],
+            ]);
             $pdo->commit();
             return;
         }
@@ -790,10 +1098,56 @@ function api_update_inventory(array $config, array $input): void
                 'created_at' => $now,
             ]
         );
+        api_append_audit_log($pdo, [
+            'operatorId' => $operator['id'] ?? null,
+            'action' => 'inventory.stock.updated',
+            'entityType' => 'inventory',
+            'entityId' => $productId,
+            'description' => $product['name'] . ' uchun ombor harakati yozildi',
+            'metadata' => [
+                'type' => $type,
+                'quantity' => $quantity,
+                'resultingStock' => $nextStock,
+            ],
+        ]);
 
         $pdo->commit();
     } catch (Throwable $exception) {
         $pdo->rollBack();
         throw $exception;
     }
+}
+
+function api_update_operator_role(array $config, array $actor, string $operatorId, array $input): void
+{
+    $role = (string) ($input['role'] ?? '');
+    if (!in_array($role, ['admin', 'cashier'], true)) {
+        throw new ApiException(400, "Ruxsat noto'g'ri");
+    }
+
+    $pdo = api_pdo($config);
+    $operatorRow = api_fetch_one($pdo, 'select * from operators where id = :id limit 1', ['id' => $operatorId]);
+    if (!$operatorRow) {
+        throw new ApiException(404, 'Operator topilmadi');
+    }
+
+    $now = gmdate(DATE_ATOM);
+    api_execute(
+        $pdo,
+        'update operators set role = :role, updated_at = :updated_at where id = :id',
+        [
+            'role' => $role,
+            'updated_at' => $now,
+            'id' => $operatorId,
+        ]
+    );
+
+    api_append_audit_log($pdo, [
+        'operatorId' => $actor['id'] ?? null,
+        'action' => 'operator.role.updated',
+        'entityType' => 'operator',
+        'entityId' => $operatorId,
+        'description' => $operatorRow['full_name'] . ' roli yangilandi',
+        'metadata' => ['role' => $role],
+    ]);
 }

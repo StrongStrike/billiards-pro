@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
-import { Download, PackageSearch, SlidersHorizontal, Table2 } from "lucide-react";
+import { AlertTriangle, Download, FileSpreadsheet, FileText, PackageSearch, SlidersHorizontal, Table2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
@@ -10,6 +10,7 @@ import { Panel } from "@/components/ui/panel";
 import { ModalNote, ModalStat, ResponsiveModal } from "@/components/ui/responsive-modal";
 import { Reveal, Stagger, StaggerItem } from "@/components/ui/reveal";
 import { useBootstrapQuery, useReportsQuery } from "@/lib/hooks/use-club-data";
+import { downloadExcelReport, printReportPdf } from "@/lib/report-export";
 import { downloadCsv, formatCurrency, formatDateTimeLabel, formatDuration, toCsv } from "@/lib/utils";
 import { MetricCard, SectionHeader } from "@/features/shared";
 import type { ReportRange } from "@/types/club";
@@ -84,9 +85,27 @@ export function ReportsPage() {
   const { products, settings, tables } = bootstrapQuery.data;
   const adjustmentsAvailable = typeof (report as Partial<typeof report>).adjustmentsTotal === "number";
   const adjustmentsTotal = adjustmentsAvailable ? report.adjustmentsTotal : 0;
+  const tablePerformance = Array.isArray((report as Partial<typeof report>).tablePerformance) ? report.tablePerformance : [];
+  const categorySales = Array.isArray((report as Partial<typeof report>).categorySales) ? report.categorySales : [];
+  const shiftHistory = Array.isArray((report as Partial<typeof report>).shiftHistory) ? report.shiftHistory : [];
+  const lowStockAnalytics =
+    Array.isArray((report as Partial<typeof report>).lowStockAnalytics) ? report.lowStockAnalytics : [];
+  const cashDiscrepancyTotal =
+    typeof (report as Partial<typeof report>).cashDiscrepancyTotal === "number" ? report.cashDiscrepancyTotal : 0;
   const leadTable = report.topTables[0];
   const leadProduct = report.topProducts[0];
-  const selectedTableReport = report.topTables.find((table) => table.tableId === selectedTableId) ?? null;
+  const selectedTableReport =
+    tablePerformance.find((table) => table.tableId === selectedTableId) ??
+    (() => {
+      const fallback = report.topTables.find((table) => table.tableId === selectedTableId);
+      return fallback
+        ? {
+            ...fallback,
+            sessionsCount: 0,
+            averageCheck: 0,
+          }
+        : null;
+    })();
   const selectedTableSnapshot = tables.find((table) => table.id === selectedTableId) ?? null;
   const selectedProductReport = report.topProducts.find((product) => product.productId === selectedProductId) ?? null;
   const selectedProduct = products.find((product) => product.id === selectedProductId) ?? null;
@@ -129,7 +148,7 @@ export function ReportsPage() {
         }
       />
 
-      <Stagger className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <Stagger className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
         <StaggerItem>
           <MetricCard
             label="Jami tushum"
@@ -158,7 +177,7 @@ export function ReportsPage() {
             label="Billing tuzatish"
             value={formatCurrency(adjustmentsTotal, report.currency)}
             accent={adjustmentsAvailable ? "cyan" : "slate"}
-            hint={adjustmentsAvailable ? "Chegirma va qo'shimchalar" : "Backend eski payload"}
+            hint={adjustmentsAvailable ? "Qo'lda kiritilgan yozuvlar" : "Backend eski payload"}
           />
         </StaggerItem>
         <StaggerItem>
@@ -167,6 +186,14 @@ export function ReportsPage() {
             value={formatDuration(report.playMinutes)}
             accent="slate"
             hint={leadTable ? `${leadTable.tableName} eng faol` : "Stollar kesimi"}
+          />
+        </StaggerItem>
+        <StaggerItem>
+          <MetricCard
+            label="Kassa tafovuti"
+            value={formatCurrency(cashDiscrepancyTotal, report.currency)}
+            accent={cashDiscrepancyTotal === 0 ? "slate" : cashDiscrepancyTotal > 0 ? "green" : "amber"}
+            hint={shiftHistory.length > 0 ? `${shiftHistory.length} smena kesimi` : "Smena ma'lumoti"}
           />
         </StaggerItem>
       </Stagger>
@@ -226,8 +253,17 @@ export function ReportsPage() {
                 <div className="mt-2 font-semibold text-white">{formatCurrency(adjustmentsTotal, settings.currency)}</div>
                 <div className="mt-1 text-sm text-slate-400">
                   {adjustmentsAvailable
-                    ? "Chegirma, komplement va qo'lda kiritilgan tuzatishlar hisobotga qo'shilgan."
+                    ? "Qo'lda kiritilgan billing tuzatishlari hisobotga qo'shilgan."
                     : "Joriy tashqi backend hali adjustmentsTotal maydonini yubormayapti."}
+                </div>
+              </div>
+              <div className="sheen-surface rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
+                <div className="text-xs uppercase tracking-[0.22em] text-slate-500">Smena tafovuti</div>
+                <div className="mt-2 font-semibold text-white">{formatCurrency(cashDiscrepancyTotal, settings.currency)}</div>
+                <div className="mt-1 text-sm text-slate-400">
+                  {shiftHistory.length > 0
+                    ? "Ochilgan va yopilgan smenalar bo'yicha kassa tafovuti yig'indisi."
+                    : "Hisobot davrida smena yozuvlari topilmadi."}
                 </div>
               </div>
             </div>
@@ -292,6 +328,130 @@ export function ReportsPage() {
                   </div>
                 </button>
               ))}
+            </div>
+          </Panel>
+        </Reveal>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
+        <Reveal>
+          <Panel tone="amber" className="hud-frame">
+            <div className="flex items-center justify-between gap-3">
+              <div className="font-display text-2xl font-bold text-white">Smena tarixi va tafovut</div>
+              <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                {shiftHistory.length} smena
+              </div>
+            </div>
+            <div className="mt-5 space-y-3">
+              {shiftHistory.length === 0 ? (
+                <ModalNote tone="slate">Tanlangan davrda smena yozuvlari topilmadi.</ModalNote>
+              ) : (
+                shiftHistory.map((shift) => (
+                  <div key={shift.shiftId} className="rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <div>
+                        <div className="font-semibold text-white">{shift.openedByOperatorName ?? shift.shiftId}</div>
+                        <div className="mt-1 text-sm text-slate-400">
+                          {formatDateTimeLabel(shift.openedAt, settings.timezone)}
+                          {shift.closedAt ? ` - ${formatDateTimeLabel(shift.closedAt, settings.timezone)}` : " - Ochiq"}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="data-chip">
+                          {shift.status === "paused" ? "Pauza" : shift.status === "open" ? "Faol" : "Yopilgan"}
+                        </div>
+                        <div className="mt-2 font-display text-xl font-bold text-white">
+                          {typeof shift.discrepancy === "number"
+                            ? formatCurrency(shift.discrepancy, settings.currency)
+                            : "Yakunlanmagan"}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                      <div className="rounded-[18px] border border-white/8 bg-white/[0.03] px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Tushum</div>
+                        <div className="mt-2 font-semibold text-white">{formatCurrency(shift.revenue, settings.currency)}</div>
+                      </div>
+                      <div className="rounded-[18px] border border-white/8 bg-white/[0.03] px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Kassa oqimi</div>
+                        <div className="mt-2 font-semibold text-white">{formatCurrency(shift.cashMovementNet, settings.currency)}</div>
+                      </div>
+                      <div className="rounded-[18px] border border-white/8 bg-white/[0.03] px-4 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Kutilgan yakun</div>
+                        <div className="mt-2 font-semibold text-white">{formatCurrency(shift.expectedCash, settings.currency)}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </Panel>
+        </Reveal>
+
+        <Reveal>
+          <Panel tone="green" className="hud-frame">
+            <div className="grid gap-5 xl:grid-cols-[1fr_0.95fr]">
+              <div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-display text-2xl font-bold text-white">Kategoriyalar bo&#39;yicha savdo</div>
+                  <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                    {categorySales.length} kategoriya
+                  </div>
+                </div>
+                <div className="mt-5 space-y-3">
+                  {categorySales.length === 0 ? (
+                    <ModalNote tone="slate">Tanlangan davrda kategoriya bo&#39;yicha savdo topilmadi.</ModalNote>
+                  ) : (
+                    categorySales.map((category) => (
+                      <div key={category.categoryId} className="rounded-[22px] border border-white/8 bg-white/[0.04] p-4">
+                        <div className="flex items-center justify-between gap-4">
+                          <div>
+                            <div className="font-semibold text-white">{category.categoryName}</div>
+                            <div className="mt-1 text-sm text-slate-400">{category.quantity} dona</div>
+                          </div>
+                          <div className="font-display text-xl font-bold text-emerald-200">
+                            {formatCurrency(category.revenue, settings.currency)}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-display text-2xl font-bold text-white">Low-stock analytics</div>
+                  <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-slate-400">
+                    {lowStockAnalytics.length} mahsulot
+                  </div>
+                </div>
+                <div className="mt-5 space-y-3">
+                  {lowStockAnalytics.length === 0 ? (
+                    <ModalNote tone="green">Kritik qoldiqdagi mahsulot topilmadi.</ModalNote>
+                  ) : (
+                    lowStockAnalytics.map((product) => (
+                      <div key={product.productId} className="rounded-[22px] border border-amber-300/16 bg-amber-400/[0.07] p-4">
+                        <div className="flex items-center justify-between gap-4">
+                          <div>
+                            <div className="font-semibold text-white">{product.productName}</div>
+                            <div className="mt-1 text-sm text-amber-100/80">{product.categoryName}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-display text-xl font-bold text-amber-100">{product.stock}</div>
+                            <div className="mt-1 text-xs uppercase tracking-[0.2em] text-amber-100/70">
+                              Threshold {product.threshold}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-3 text-sm text-amber-50/80">
+                          Yetishmayotgan birlik: {product.gap}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
           </Panel>
         </Reveal>
@@ -378,6 +538,28 @@ export function ReportsPage() {
               <Download className="h-4 w-4" />
               CSV yuklab olish
             </Button>
+            <Button
+              variant="secondary"
+              className="gap-2"
+              onClick={() => {
+                downloadExcelReport(report);
+                setExportOpen(false);
+              }}
+            >
+              <FileSpreadsheet className="h-4 w-4" />
+              Excel
+            </Button>
+            <Button
+              variant="secondary"
+              className="gap-2"
+              onClick={() => {
+                printReportPdf(report);
+                setExportOpen(false);
+              }}
+            >
+              <FileText className="h-4 w-4" />
+              PDF
+            </Button>
           </div>
         }
       >
@@ -401,6 +583,7 @@ export function ReportsPage() {
               <div>Davr kesimi va label</div>
               <div>Tushum, seanslar va bandlik foizi</div>
               <div>Billing tuzatish: {formatCurrency(adjustmentsTotal, report.currency)}</div>
+              <div>Kassa tafovuti: {formatCurrency(cashDiscrepancyTotal, report.currency)}</div>
               <div>Joriy timezone: {report.timezone}</div>
             </div>
           </div>
@@ -437,6 +620,14 @@ export function ReportsPage() {
               <ModalStat label="Tushum" value={formatCurrency(selectedTableReport.revenue, settings.currency)} hint="Joriy davr" />
               <ModalStat label="Band vaqt" value={formatDuration(selectedTableReport.minutes)} hint="Yuklama" />
               <ModalStat label="Ulush" value={formatPercentage(tableRevenueShare)} hint="Jami tushumdan" />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <ModalStat label="Seanslar" value={`${selectedTableReport.sessionsCount}`} hint="Yopilgan seanslar" />
+              <ModalStat
+                label="O'rtacha chek"
+                value={formatCurrency(selectedTableReport.averageCheck, settings.currency)}
+                hint="Davr bo'yicha"
+              />
             </div>
             <ModalNote tone={selectedTableSnapshot?.status === "active" ? "green" : "slate"}>
               {selectedTableSnapshot?.activeSession
@@ -519,6 +710,12 @@ export function ReportsPage() {
                 </div>
               </div>
             </div>
+            {selectedProduct && selectedProduct.stock <= selectedProduct.threshold ? (
+              <ModalNote tone="amber">
+                <AlertTriangle className="mr-2 inline h-4 w-4" />
+                Past qoldiq: hozir {selectedProduct.stock}, threshold esa {selectedProduct.threshold}.
+              </ModalNote>
+            ) : null}
           </div>
         ) : null}
       </Drawer>

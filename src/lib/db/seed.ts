@@ -1,6 +1,7 @@
 import { addHours, addMinutes, subDays, subHours, subMinutes } from "date-fns";
 
 import type {
+  AuditLog,
   BillAdjustment,
   CashMovement,
   ClubSettings,
@@ -9,6 +10,8 @@ import type {
   Product,
   ProductCategory,
   Reservation,
+  Shift,
+  ShiftEvent,
   StockMovement,
   Table,
   TableSession,
@@ -26,6 +29,9 @@ export interface SeedDataset {
   stockMovements: StockMovement[];
   cashMovements: CashMovement[];
   billAdjustments: BillAdjustment[];
+  shifts: Shift[];
+  shiftEvents: ShiftEvent[];
+  auditLogs: AuditLog[];
 }
 
 export function createSeedDataset(now = new Date()): SeedDataset {
@@ -203,13 +209,15 @@ export function createSeedDataset(now = new Date()): SeedDataset {
       type: "service_in",
       amount: 300000,
       reason: "Smena boshida kassaga xizmat puli kiritildi",
-      createdAt: subHours(now, 10).toISOString(),
+      shiftId: "shift-0",
+      createdAt: subHours(now, 8).toISOString(),
     },
     {
       id: "cash-2",
       type: "change",
       amount: 120000,
       reason: "Mayda pul uchun razmen qilindi",
+      shiftId: "shift-0",
       createdAt: subHours(now, 5).toISOString(),
     },
     {
@@ -217,7 +225,8 @@ export function createSeedDataset(now = new Date()): SeedDataset {
       type: "expense",
       amount: 45000,
       reason: "Tozalash vositalari uchun xizmat xarajati",
-      createdAt: subHours(now, 3).toISOString(),
+      shiftId: "shift-1",
+      createdAt: subHours(now, 2).toISOString(),
     },
   ];
 
@@ -225,18 +234,109 @@ export function createSeedDataset(now = new Date()): SeedDataset {
     {
       id: "adjustment-1",
       sessionId: "session-1",
-      type: "free_minutes",
-      minutes: 15,
-      reason: "Klub komplimenti sifatida 15 daqiqa qo'shildi",
+      type: "manual_charge",
+      amount: 20000,
+      shiftId: "shift-1",
+      reason: "Qo'shimcha stol aksessuari",
       createdAt: subMinutes(now, 20).toISOString(),
     },
     {
       id: "adjustment-2",
       sessionId: "session-5",
-      type: "discount",
-      amount: 30000,
-      reason: "Turnir ishtirokchisi uchun kassir chegirmasi",
+      type: "manual_charge",
+      amount: -30000,
+      shiftId: "shift-0",
+      reason: "Operator qo'lda kamaytirgan summa",
       createdAt: subHours(now, 5).toISOString(),
+    },
+  ];
+
+  const shifts: Shift[] = [
+    {
+      id: "shift-0",
+      status: "closed",
+      openingCash: 260000,
+      closingCash: 840000,
+      openedByOperatorId: "operator-cashier",
+      closedByOperatorId: "operator-admin",
+      note: "Kechki smena yakunlandi",
+      openedAt: subHours(now, 9).toISOString(),
+      closedAt: subHours(now, 4).toISOString(),
+      updatedAt: subHours(now, 4).toISOString(),
+    },
+    {
+      id: "shift-1",
+      status: "open",
+      openingCash: 450000,
+      openedByOperatorId: "operator-admin",
+      openedAt: subHours(now, 3).toISOString(),
+      updatedAt: subHours(now, 3).toISOString(),
+    },
+  ];
+
+  const shiftEvents: ShiftEvent[] = [
+    {
+      id: "shift-event-0",
+      shiftId: "shift-0",
+      operatorId: "operator-cashier",
+      type: "opened",
+      note: "Kechki smena ochildi",
+      createdAt: subHours(now, 9).toISOString(),
+    },
+    {
+      id: "shift-event-0b",
+      shiftId: "shift-0",
+      operatorId: "operator-admin",
+      type: "closed",
+      note: "Smena yakunlandi",
+      createdAt: subHours(now, 4).toISOString(),
+    },
+    {
+      id: "shift-event-1",
+      shiftId: "shift-1",
+      operatorId: "operator-admin",
+      type: "opened",
+      note: "Tonggi smena ochildi",
+      createdAt: subHours(now, 3).toISOString(),
+    },
+  ];
+
+  const auditLogs: AuditLog[] = [
+    {
+      id: "audit-1",
+      operatorId: "operator-cashier",
+      action: "shift.closed",
+      entityType: "shift",
+      entityId: "shift-0",
+      description: "Kechki smena yopildi",
+      createdAt: subHours(now, 4).toISOString(),
+    },
+    {
+      id: "audit-2",
+      operatorId: "operator-admin",
+      action: "shift.opened",
+      entityType: "shift",
+      entityId: "shift-1",
+      description: "Tonggi smena ochildi",
+      createdAt: subHours(now, 3).toISOString(),
+    },
+    {
+      id: "audit-3",
+      operatorId: "operator-admin",
+      action: "cash.movement.created",
+      entityType: "cash",
+      entityId: "cash-1",
+      description: "Smena boshida kassaga xizmat puli kiritildi",
+      createdAt: subHours(now, 8).toISOString(),
+    },
+    {
+      id: "audit-4",
+      operatorId: "operator-admin",
+      action: "bill.adjustment.created",
+      entityType: "bill",
+      entityId: "adjustment-1",
+      description: "Qo'lda billing tuzatishi qo'shildi",
+      createdAt: subMinutes(now, 20).toISOString(),
     },
   ];
 
@@ -252,5 +352,8 @@ export function createSeedDataset(now = new Date()): SeedDataset {
     stockMovements,
     cashMovements,
     billAdjustments,
+    shifts,
+    shiftEvents,
+    auditLogs,
   };
 }

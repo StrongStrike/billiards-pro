@@ -8,14 +8,23 @@ import {
   Table2,
 } from "lucide-react";
 
-export const navItems = [
-  { href: "/dashboard", label: "Boshqaruv paneli", icon: LayoutDashboard },
-  { href: "/stollar", label: "Stollar", icon: Table2 },
-  { href: "/buyurtmalar", label: "Buyurtmalar", icon: Martini },
-  { href: "/bronlar", label: "Bronlar", icon: ClipboardList },
-  { href: "/hisobotlar", label: "Hisobotlar", icon: ChartSpline },
-  { href: "/ombor", label: "Ombor", icon: Package2 },
-  { href: "/sozlamalar", label: "Sozlamalar", icon: Cog },
+import type { OperatorRole } from "@/types/club";
+
+type NavItem = {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  roles: OperatorRole[];
+};
+
+export const navItems: readonly NavItem[] = [
+  { href: "/dashboard", label: "Boshqaruv paneli", icon: LayoutDashboard, roles: ["admin", "cashier"] },
+  { href: "/stollar", label: "Stollar", icon: Table2, roles: ["admin", "cashier"] },
+  { href: "/buyurtmalar", label: "Buyurtmalar", icon: Martini, roles: ["admin", "cashier"] },
+  { href: "/bronlar", label: "Bronlar", icon: ClipboardList, roles: ["admin", "cashier"] },
+  { href: "/hisobotlar", label: "Hisobotlar", icon: ChartSpline, roles: ["admin"] },
+  { href: "/ombor", label: "Ombor", icon: Package2, roles: ["admin"] },
+  { href: "/sozlamalar", label: "Sozlamalar", icon: Cog, roles: ["admin"] },
 ] as const;
 
 export const tableStatusCopy = {

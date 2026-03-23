@@ -3,6 +3,7 @@
 type PrintDocumentOptions = {
   title: string;
   bodyHtml: string;
+  styles?: string;
 };
 
 const PRINT_STYLES = `
@@ -154,7 +155,7 @@ const PRINT_STYLES = `
   }
 `;
 
-export function openPrintDocument({ title, bodyHtml }: PrintDocumentOptions) {
+export function openPrintDocument({ title, bodyHtml, styles }: PrintDocumentOptions) {
   if (typeof window === "undefined") {
     throw new Error("Print faqat brauzer ichida ishlaydi");
   }
@@ -176,7 +177,7 @@ export function openPrintDocument({ title, bodyHtml }: PrintDocumentOptions) {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${title}</title>
-    <style>${PRINT_STYLES}</style>
+    <style>${PRINT_STYLES}${styles ? `\n${styles}` : ""}</style>
   </head>
   <body>
     ${bodyHtml}

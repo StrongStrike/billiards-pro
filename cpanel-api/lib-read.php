@@ -133,20 +133,80 @@ function api_map_cash_movement(array $row): array
         'amount' => (int) $row['amount'],
         'reason' => $row['reason'],
         'operatorId' => $row['operator_id'] ?: null,
+        'shiftId' => $row['shift_id'] ?: null,
         'createdAt' => api_iso($row['created_at']),
     ];
 }
 
 function api_map_bill_adjustment(array $row): array
 {
+    $normalizedAmount = $row['type'] === 'manual_charge'
+        ? ($row['amount'] !== null ? (int) $row['amount'] : 0)
+        : ($row['amount'] !== null ? -abs((int) $row['amount']) : 0);
+
     return [
         'id' => $row['id'],
         'sessionId' => $row['session_id'],
         'operatorId' => $row['operator_id'] ?: null,
+        'shiftId' => $row['shift_id'] ?: null,
+        'type' => 'manual_charge',
+        'amount' => $normalizedAmount,
+        'reason' => $row['reason'] ?: null,
+        'createdAt' => api_iso($row['created_at']),
+    ];
+}
+
+function api_map_shift(array $row): array
+{
+    return [
+        'id' => $row['id'],
+        'status' => $row['status'],
+        'openingCash' => (int) $row['opening_cash'],
+        'closingCash' => $row['closing_cash'] !== null ? (int) $row['closing_cash'] : null,
+        'openedByOperatorId' => $row['opened_by_operator_id'] ?: null,
+        'closedByOperatorId' => $row['closed_by_operator_id'] ?: null,
+        'note' => $row['note'] ?: null,
+        'openedAt' => api_iso($row['opened_at']),
+        'pausedAt' => api_iso($row['paused_at']),
+        'closedAt' => api_iso($row['closed_at']),
+        'updatedAt' => api_iso($row['updated_at']),
+    ];
+}
+
+function api_map_shift_event(array $row): array
+{
+    return [
+        'id' => $row['id'],
+        'shiftId' => $row['shift_id'],
+        'operatorId' => $row['operator_id'] ?: null,
         'type' => $row['type'],
-        'amount' => $row['amount'] !== null ? (int) $row['amount'] : null,
-        'minutes' => $row['minutes'] !== null ? (int) $row['minutes'] : null,
-        'reason' => $row['reason'],
+        'note' => $row['note'] ?: null,
+        'createdAt' => api_iso($row['created_at']),
+    ];
+}
+
+function api_map_audit_log(array $row): array
+{
+    return [
+        'id' => $row['id'],
+        'operatorId' => $row['operator_id'] ?: null,
+        'action' => $row['action'],
+        'entityType' => $row['entity_type'],
+        'entityId' => $row['entity_id'] ?: null,
+        'description' => $row['description'],
+        'metadata' => $row['metadata'] ?: null,
+        'createdAt' => api_iso($row['created_at']),
+    ];
+}
+
+function api_map_operator(array $row): array
+{
+    return [
+        'id' => $row['id'],
+        'name' => $row['full_name'],
+        'email' => $row['email'],
+        'role' => $row['role'],
+        'isActive' => api_boolean($row['is_active']),
         'createdAt' => api_iso($row['created_at']),
     ];
 }
@@ -171,7 +231,22 @@ function api_load_state(array $config): array
         'stockMovements' => array_map('api_map_stock_movement', api_fetch_all($pdo, 'select * from stock_movements order by created_at desc')),
         'cashMovements' => array_map('api_map_cash_movement', api_fetch_all($pdo, 'select * from cash_movements order by created_at desc')),
         'billAdjustments' => array_map('api_map_bill_adjustment', api_fetch_all($pdo, 'select * from bill_adjustments order by created_at desc')),
+        'shifts' => array_map('api_map_shift', api_fetch_all($pdo, 'select * from shifts order by opened_at desc')),
+        'shiftEvents' => array_map('api_map_shift_event', api_fetch_all($pdo, 'select * from shift_events order by created_at desc')),
+        'auditLogs' => array_map('api_map_audit_log', api_fetch_all($pdo, 'select * from audit_logs order by created_at desc')),
+        'operators' => array_map('api_map_operator', api_fetch_all($pdo, 'select * from operators order by created_at asc')),
     ];
+}
+
+function api_current_shift(array $state): ?array
+{
+    foreach ($state['shifts'] as $shift) {
+        if (in_array($shift['status'], ['open', 'paused'], true)) {
+            return $shift;
+        }
+    }
+
+    return null;
 }
 
 function api_build_counter_sales(array $orders, array $orderItems): array
@@ -415,6 +490,7 @@ function api_get_bootstrap_payload(array $config, array $operator): array
 
     return [
         'operator' => $operator,
+        'operators' => ($operator['role'] ?? 'admin') === 'admin' ? $state['operators'] : [],
         'settings' => $state['settings'],
         'tables' => $tables,
         'reservations' => $state['reservations'],
@@ -426,6 +502,9 @@ function api_get_bootstrap_payload(array $config, array $operator): array
         'stockMovements' => $state['stockMovements'],
         'cashMovements' => $state['cashMovements'],
         'billAdjustments' => $state['billAdjustments'],
+        'activeShift' => api_current_shift($state),
+        'shiftEvents' => $state['shiftEvents'],
+        'auditLogs' => ($operator['role'] ?? 'admin') === 'admin' ? array_slice($state['auditLogs'], 0, 30) : [],
         'kpis' => $kpis,
         'lowStockProducts' => api_low_stock_products($state),
         'generatedAt' => $now->format(DATE_ATOM),

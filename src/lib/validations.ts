@@ -41,31 +41,37 @@ export const cashMovementSchema = z.object({
 export const billAdjustmentSchema = z
   .object({
     sessionId: z.string().min(1),
-    type: z.enum(["discount", "compliment", "free_minutes", "manual_charge"]),
-    amount: z.number().int().positive().optional(),
-    minutes: z.number().int().positive().max(240).optional(),
-    reason: z.string().trim().min(4).max(180),
+    type: z.literal("manual_charge").default("manual_charge"),
+    amount: z.number().int().min(-2_000_000).max(2_000_000),
+    reason: z.string().trim().max(180).optional(),
   })
   .superRefine((value, context) => {
-    if (value.type === "free_minutes") {
-      if (!value.minutes) {
-        context.addIssue({
-          code: "custom",
-          path: ["minutes"],
-          message: "Bepul daqiqa miqdorini kiriting",
-        });
-      }
-      return;
-    }
-
-    if (!value.amount) {
+    if (value.amount === 0) {
       context.addIssue({
         code: "custom",
         path: ["amount"],
-        message: "Summani kiriting",
+        message: "Nol bo'lmagan summani kiriting",
       });
     }
   });
+
+export const shiftOpenSchema = z.object({
+  openingCash: z.number().int().min(0).max(50_000_000).default(0),
+  note: z.string().trim().max(180).optional(),
+});
+
+export const shiftPauseSchema = z.object({
+  note: z.string().trim().max(180).optional(),
+});
+
+export const shiftCloseSchema = z.object({
+  closingCash: z.number().int().min(0).max(50_000_000),
+  note: z.string().trim().max(180).optional(),
+});
+
+export const operatorRoleSchema = z.object({
+  role: z.enum(["admin", "cashier"]),
+});
 
 export const reservationSchema = z
   .object({

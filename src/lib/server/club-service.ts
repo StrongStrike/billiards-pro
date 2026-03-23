@@ -2,6 +2,7 @@ import { addHours, differenceInMinutes } from "date-fns";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 
 import {
+  auditLogs,
   billAdjustments,
   billiardTables,
   cashMovements,
@@ -12,6 +13,8 @@ import {
   productCategories,
   products,
   reservations,
+  shiftEvents,
+  shifts,
   stockMovements,
   tableSessions,
 } from "@/lib/db/schema";
@@ -30,12 +33,15 @@ import {
 } from "@/lib/domain/logic";
 import { getReportWindow, isSameZonedDay } from "@/lib/time";
 import type {
+  AuditLog,
   BillAdjustment,
   BootstrapPayload,
   CashMovement,
   ClubSettings,
   DashboardActivityPoint,
   OperatorSession,
+  OperatorRole,
+  OperatorSummary,
   Order,
   OrderItem,
   Product,
@@ -43,6 +49,8 @@ import type {
   RangeReport,
   ReportRange,
   Reservation,
+  Shift,
+  ShiftEvent,
   StockMovement,
   Table,
   TableSession,
@@ -52,7 +60,9 @@ import type {
 } from "@/types/club";
 
 type Database = ReturnType<typeof requireDatabase>;
-type QueryExecutor = Pick<Database, "select">;
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+type QueryExecutor = Pick<Database | Transaction, "select">;
+type MutationExecutor = Pick<Database | Transaction, "insert">;
 
 const RESERVED_LOOKAHEAD_HOURS = 4;
 
@@ -189,19 +199,74 @@ function mapCashMovementRow(row: typeof cashMovements.$inferSelect): CashMovemen
     amount: row.amount,
     reason: row.reason,
     operatorId: row.operatorId ?? undefined,
+    shiftId: row.shiftId ?? undefined,
     createdAt: row.createdAt.toISOString(),
   };
 }
 
 function mapBillAdjustmentRow(row: typeof billAdjustments.$inferSelect): BillAdjustment {
+  const normalizedAmount =
+    row.type === "manual_charge" ? row.amount ?? 0 : row.amount !== null ? -Math.abs(row.amount) : 0;
+
   return {
     id: row.id,
     sessionId: row.sessionId,
     operatorId: row.operatorId ?? undefined,
+    shiftId: row.shiftId ?? undefined,
+    type: "manual_charge",
+    amount: normalizedAmount,
+    reason: row.reason ?? undefined,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function mapShiftRow(row: typeof shifts.$inferSelect): Shift {
+  return {
+    id: row.id,
+    status: row.status,
+    openingCash: row.openingCash,
+    closingCash: row.closingCash ?? undefined,
+    openedByOperatorId: row.openedByOperatorId ?? undefined,
+    closedByOperatorId: row.closedByOperatorId ?? undefined,
+    note: row.note ?? undefined,
+    openedAt: row.openedAt.toISOString(),
+    pausedAt: toIso(row.pausedAt),
+    closedAt: toIso(row.closedAt),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function mapShiftEventRow(row: typeof shiftEvents.$inferSelect): ShiftEvent {
+  return {
+    id: row.id,
+    shiftId: row.shiftId,
+    operatorId: row.operatorId ?? undefined,
     type: row.type,
-    amount: row.amount ?? undefined,
-    minutes: row.minutes ?? undefined,
-    reason: row.reason,
+    note: row.note ?? undefined,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function mapAuditLogRow(row: typeof auditLogs.$inferSelect): AuditLog {
+  return {
+    id: row.id,
+    operatorId: row.operatorId ?? undefined,
+    action: row.action,
+    entityType: row.entityType as AuditLog["entityType"],
+    entityId: row.entityId ?? undefined,
+    description: row.description,
+    metadata: row.metadata ?? undefined,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function mapOperatorRow(row: typeof operators.$inferSelect): OperatorSummary {
+  return {
+    id: row.id,
+    name: row.fullName,
+    email: row.email,
+    role: row.role,
+    isActive: row.isActive,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -219,6 +284,10 @@ async function loadClubDataset(db: Database = requireDatabase()) {
     stockMovementRows,
     cashMovementRows,
     billAdjustmentRows,
+    shiftRows,
+    shiftEventRows,
+    auditLogRows,
+    operatorRows,
   ] = await Promise.all([
     db.select().from(clubSettings).limit(1),
     db.select().from(billiardTables).orderBy(asc(billiardTables.position)),
@@ -231,6 +300,10 @@ async function loadClubDataset(db: Database = requireDatabase()) {
     db.select().from(stockMovements).orderBy(desc(stockMovements.createdAt)),
     db.select().from(cashMovements).orderBy(desc(cashMovements.createdAt)),
     db.select().from(billAdjustments).orderBy(desc(billAdjustments.createdAt)),
+    db.select().from(shifts).orderBy(desc(shifts.openedAt)),
+    db.select().from(shiftEvents).orderBy(desc(shiftEvents.createdAt)),
+    db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)),
+    db.select().from(operators).orderBy(asc(operators.createdAt)),
   ]);
 
   const settingsRow = settingsRows[0];
@@ -250,7 +323,68 @@ async function loadClubDataset(db: Database = requireDatabase()) {
     stockMovements: stockMovementRows.map(mapStockMovementRow),
     cashMovements: cashMovementRows.map(mapCashMovementRow),
     billAdjustments: billAdjustmentRows.map(mapBillAdjustmentRow),
+    shifts: shiftRows.map(mapShiftRow),
+    shiftEvents: shiftEventRows.map(mapShiftEventRow),
+    auditLogs: auditLogRows.map(mapAuditLogRow),
+    operators: operatorRows.map(mapOperatorRow),
   };
+}
+
+function getCurrentShiftRecord(shiftList: Shift[]) {
+  return shiftList.find((shift) => shift.status === "open" || shift.status === "paused") ?? null;
+}
+
+async function getCurrentShiftRow(tx: QueryExecutor) {
+  const activeRows = await tx
+    .select()
+    .from(shifts)
+    .where(inArray(shifts.status, ["open", "paused"]))
+    .orderBy(desc(shifts.openedAt))
+    .limit(1);
+  return activeRows[0] ?? null;
+}
+
+async function appendAuditLog(
+  tx: MutationExecutor,
+  input: {
+    action: string;
+    entityType: AuditLog["entityType"];
+    entityId?: string | null;
+    description: string;
+    operatorId?: string | null;
+    metadata?: Record<string, unknown> | null;
+  },
+) {
+  await tx.insert(auditLogs).values({
+    id: createId("audit"),
+    operatorId: input.operatorId ?? null,
+    action: input.action,
+    entityType: input.entityType,
+    entityId: input.entityId ?? null,
+    description: input.description,
+    metadata: input.metadata ? JSON.stringify(input.metadata) : null,
+    createdAt: new Date(),
+  });
+}
+
+async function appendShiftEvent(
+  tx: MutationExecutor,
+  input: {
+    shiftId: string;
+    operatorId?: string | null;
+    type: ShiftEvent["type"];
+    note?: string | null;
+    createdAt?: Date;
+  },
+) {
+  await tx.insert(shiftEvents).values({
+    id: createId("shift-event"),
+    shiftId: input.shiftId,
+    operatorId: input.operatorId ?? null,
+    type: input.type,
+    note: input.note ?? null,
+    createdAt: input.createdAt ?? new Date(),
+  });
 }
 
 function getTableRate(type: TableType, settings: ClubSettings) {
@@ -514,6 +648,14 @@ export async function getBootstrapPayload(
 ): Promise<BootstrapPayload> {
   const state = await loadClubDataset();
   const now = new Date();
+  const operator =
+    operatorOverride ?? {
+      id: "operator",
+      name: state.settings.operatorName,
+      email: state.settings.operatorEmail,
+      role: "admin" as const,
+      mode: "database" as const,
+    };
   const tables = buildTableSnapshots(
     state.tables,
     state.sessions,
@@ -537,13 +679,8 @@ export async function getBootstrapPayload(
   });
 
   return {
-    operator:
-      operatorOverride ?? {
-        id: "operator",
-        name: state.settings.operatorName,
-        email: state.settings.operatorEmail,
-        mode: "database",
-      },
+    operator,
+    operators: operator.role === "admin" ? state.operators : [],
     settings: state.settings,
     tables,
     reservations: state.reservations,
@@ -555,6 +692,9 @@ export async function getBootstrapPayload(
     stockMovements: state.stockMovements,
     cashMovements: state.cashMovements,
     billAdjustments: state.billAdjustments,
+    activeShift: getCurrentShiftRecord(state.shifts),
+    shiftEvents: state.shiftEvents,
+    auditLogs: operator.role === "admin" ? state.auditLogs.slice(0, 30) : [],
     kpis,
     lowStockProducts: buildLowStockProducts(state.products, state.orders, state.orderItems),
     generatedAt: now.toISOString(),
@@ -573,9 +713,244 @@ export async function getDashboardActivity(): Promise<DashboardActivityPoint[]> 
   });
 }
 
+export async function getCurrentShift(): Promise<Shift | null> {
+  const state = await loadClubDataset();
+  return getCurrentShiftRecord(state.shifts);
+}
+
+export async function openShift(input: {
+  openingCash: number;
+  note?: string;
+  operatorId: string;
+}) {
+  const db = requireDatabase();
+
+  await db.transaction(async (tx) => {
+    const currentShift = await getCurrentShiftRow(tx);
+    if (currentShift) {
+      throw new Error("Avval joriy smenani yoping yoki davom ettiring");
+    }
+
+    const now = new Date();
+    const shiftId = createId("shift");
+    await tx.insert(shifts).values({
+      id: shiftId,
+      status: "open",
+      openingCash: input.openingCash,
+      openedByOperatorId: input.operatorId,
+      note: input.note?.trim() || null,
+      openedAt: now,
+      pausedAt: null,
+      closedAt: null,
+      updatedAt: now,
+    });
+
+    await appendShiftEvent(tx, {
+      shiftId,
+      operatorId: input.operatorId,
+      type: "opened",
+      note: input.note?.trim() || null,
+      createdAt: now,
+    });
+    await appendAuditLog(tx, {
+      operatorId: input.operatorId,
+      action: "shift.opened",
+      entityType: "shift",
+      entityId: shiftId,
+      description: "Smena ochildi",
+      metadata: {
+        openingCash: input.openingCash,
+      },
+    });
+  });
+}
+
+export async function pauseShift(input: {
+  note?: string;
+  operatorId: string;
+}) {
+  const db = requireDatabase();
+
+  await db.transaction(async (tx) => {
+    const currentShift = await getCurrentShiftRow(tx);
+    if (!currentShift || currentShift.status !== "open") {
+      throw new Error("Faol smenani pauzaga qo'yish mumkin");
+    }
+
+    const now = new Date();
+    await tx
+      .update(shifts)
+      .set({
+        status: "paused",
+        pausedAt: now,
+        updatedAt: now,
+        note: input.note?.trim() || currentShift.note,
+      })
+      .where(eq(shifts.id, currentShift.id));
+
+    await appendShiftEvent(tx, {
+      shiftId: currentShift.id,
+      operatorId: input.operatorId,
+      type: "paused",
+      note: input.note?.trim() || null,
+      createdAt: now,
+    });
+    await appendAuditLog(tx, {
+      operatorId: input.operatorId,
+      action: "shift.paused",
+      entityType: "shift",
+      entityId: currentShift.id,
+      description: "Smena pauzaga qo'yildi",
+    });
+  });
+}
+
+export async function resumeShift(input: {
+  note?: string;
+  operatorId: string;
+}) {
+  const db = requireDatabase();
+
+  await db.transaction(async (tx) => {
+    const currentShift = await getCurrentShiftRow(tx);
+    if (!currentShift || currentShift.status !== "paused") {
+      throw new Error("Pauzadagi smenani davom ettirish mumkin");
+    }
+
+    const now = new Date();
+    await tx
+      .update(shifts)
+      .set({
+        status: "open",
+        pausedAt: null,
+        updatedAt: now,
+      })
+      .where(eq(shifts.id, currentShift.id));
+
+    await appendShiftEvent(tx, {
+      shiftId: currentShift.id,
+      operatorId: input.operatorId,
+      type: "resumed",
+      note: input.note?.trim() || null,
+      createdAt: now,
+    });
+    await appendAuditLog(tx, {
+      operatorId: input.operatorId,
+      action: "shift.resumed",
+      entityType: "shift",
+      entityId: currentShift.id,
+      description: "Smena davom ettirildi",
+    });
+  });
+}
+
+export async function closeShift(input: {
+  closingCash: number;
+  note?: string;
+  operatorId: string;
+}) {
+  const db = requireDatabase();
+
+  await db.transaction(async (tx) => {
+    const currentShift = await getCurrentShiftRow(tx);
+    if (!currentShift) {
+      throw new Error("Yopish uchun faol smena topilmadi");
+    }
+
+    const now = new Date();
+    await tx
+      .update(shifts)
+      .set({
+        status: "closed",
+        closingCash: input.closingCash,
+        closedByOperatorId: input.operatorId,
+        closedAt: now,
+        updatedAt: now,
+        note: input.note?.trim() || currentShift.note,
+      })
+      .where(eq(shifts.id, currentShift.id));
+
+    await appendShiftEvent(tx, {
+      shiftId: currentShift.id,
+      operatorId: input.operatorId,
+      type: "closed",
+      note: input.note?.trim() || null,
+      createdAt: now,
+    });
+    await appendAuditLog(tx, {
+      operatorId: input.operatorId,
+      action: "shift.closed",
+      entityType: "shift",
+      entityId: currentShift.id,
+      description: "Smena yopildi",
+      metadata: {
+        closingCash: input.closingCash,
+      },
+    });
+  });
+}
+
+export async function getAuditLogs(limit = 80): Promise<AuditLog[]> {
+  const db = requireDatabase();
+  const rows = await db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(limit);
+  return rows.map(mapAuditLogRow);
+}
+
+export async function createAuditLog(input: {
+  operatorId?: string;
+  action: string;
+  entityType: AuditLog["entityType"];
+  entityId?: string;
+  description: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const db = requireDatabase();
+  await appendAuditLog(db, {
+    operatorId: input.operatorId ?? null,
+    action: input.action,
+    entityType: input.entityType,
+    entityId: input.entityId ?? null,
+    description: input.description,
+    metadata: input.metadata ?? null,
+  });
+}
+
+export async function updateOperatorRole(
+  operatorId: string,
+  input: { role: OperatorRole; actorOperatorId: string },
+) {
+  const db = requireDatabase();
+
+  await db.transaction(async (tx) => {
+    const [targetOperator] = await tx.select().from(operators).where(eq(operators.id, operatorId)).limit(1);
+    if (!targetOperator) {
+      throw new Error("Operator topilmadi");
+    }
+
+    await tx
+      .update(operators)
+      .set({
+        role: input.role,
+        updatedAt: new Date(),
+      })
+      .where(eq(operators.id, operatorId));
+
+    await appendAuditLog(tx, {
+      operatorId: input.actorOperatorId,
+      action: "operator.role.updated",
+      entityType: "operator",
+      entityId: operatorId,
+      description: `${targetOperator.fullName} roli yangilandi`,
+      metadata: {
+        role: input.role,
+      },
+    });
+  });
+}
+
 export async function startTableSession(
   tableId: string,
-  input: { customerName: string; note?: string },
+  input: { customerName: string; note?: string; operatorId?: string },
 ) {
   const db = requireDatabase();
 
@@ -604,8 +979,9 @@ export async function startTableSession(
     }
 
     const now = new Date();
+    const sessionId = createId("session");
     await tx.insert(tableSessions).values({
-      id: createId("session"),
+      id: sessionId,
       tableId,
       customerName: input.customerName,
       note: input.note,
@@ -616,10 +992,21 @@ export async function startTableSession(
       createdAt: now,
       updatedAt: now,
     });
+    await appendAuditLog(tx, {
+      operatorId: input.operatorId ?? null,
+      action: "session.started",
+      entityType: "session",
+      entityId: sessionId,
+      description: `${tableRow.name} uchun yangi seans boshlandi`,
+      metadata: {
+        tableId,
+        customerName: input.customerName,
+      },
+    });
   });
 }
 
-export async function stopTableSession(tableId: string, input: { note?: string }) {
+export async function stopTableSession(tableId: string, input: { note?: string; operatorId?: string }) {
   const db = requireDatabase();
 
   await db.transaction(async (tx) => {
@@ -716,6 +1103,18 @@ export async function stopTableSession(tableId: string, input: { note?: string }
         updatedAt: settledAt,
       })
       .where(eq(reservations.sessionId, activeSessionRow.id));
+
+    await appendAuditLog(tx, {
+      operatorId: input.operatorId ?? null,
+      action: "session.stopped",
+      entityType: "session",
+      entityId: activeSessionRow.id,
+      description: `${activeSessionRow.customerName} seansi yopildi`,
+      metadata: {
+        tableId,
+        settledAt: settledAt.toISOString(),
+      },
+    });
   });
 }
 
@@ -724,6 +1123,7 @@ export async function createTableOrder(input: {
   sessionId?: string;
   note?: string;
   items: Array<{ productId: string; quantity: number }>;
+  operatorId?: string;
 }) {
   const db = requireDatabase();
 
@@ -806,6 +1206,19 @@ export async function createTableOrder(input: {
         createdAt: now,
       });
     }
+
+    await appendAuditLog(tx, {
+      operatorId: input.operatorId ?? null,
+      action: "order.table.created",
+      entityType: "order",
+      entityId: orderId,
+      description: "Stol uchun bar buyurtmasi yaratildi",
+      metadata: {
+        sessionId: activeSession.id,
+        tableId: activeSession.tableId,
+        items: input.items.length,
+      },
+    });
   });
 }
 
@@ -813,6 +1226,7 @@ export async function createCounterSale(input: {
   customerName?: string;
   note?: string;
   items: Array<{ productId: string; quantity: number }>;
+  operatorId?: string;
 }) {
   const db = requireDatabase();
 
@@ -882,6 +1296,18 @@ export async function createCounterSale(input: {
         createdAt,
       });
     }
+
+    await appendAuditLog(tx, {
+      operatorId: input.operatorId ?? null,
+      action: "order.counter.created",
+      entityType: "order",
+      entityId: orderId,
+      description: "Kassa savdosi rasmiylashtirildi",
+      metadata: {
+        customerName: input.customerName ?? null,
+        items: input.items.length,
+      },
+    });
   });
 }
 
@@ -892,46 +1318,83 @@ export async function createCashMovement(input: {
   operatorId?: string;
 }) {
   const db = requireDatabase();
+  await db.transaction(async (tx) => {
+    const now = new Date();
+    const currentShift = await getCurrentShiftRow(tx);
+    const cashId = createId("cash");
 
-  await db.insert(cashMovements).values({
-    id: createId("cash"),
-    type: input.type,
-    amount: input.amount,
-    reason: input.reason.trim(),
-    operatorId: input.operatorId ?? null,
-    createdAt: new Date(),
+    await tx.insert(cashMovements).values({
+      id: cashId,
+      type: input.type,
+      amount: input.amount,
+      reason: input.reason.trim(),
+      operatorId: input.operatorId ?? null,
+      shiftId: currentShift?.id ?? null,
+      createdAt: now,
+    });
+
+    await appendAuditLog(tx, {
+      operatorId: input.operatorId ?? null,
+      action: "cash.movement.created",
+      entityType: "cash",
+      entityId: cashId,
+      description: "Kassa harakati saqlandi",
+      metadata: {
+        type: input.type,
+        amount: input.amount,
+        shiftId: currentShift?.id ?? null,
+      },
+    });
   });
 }
 
 export async function createBillAdjustment(input: {
   sessionId: string;
   type: BillAdjustment["type"];
-  amount?: number;
-  minutes?: number;
-  reason: string;
+  amount: number;
+  reason?: string;
   operatorId?: string;
 }) {
   const db = requireDatabase();
+  await db.transaction(async (tx) => {
+    const [sessionRow] = await tx
+      .select()
+      .from(tableSessions)
+      .where(and(eq(tableSessions.id, input.sessionId), eq(tableSessions.status, "active")))
+      .limit(1);
 
-  const [sessionRow] = await db
-    .select()
-    .from(tableSessions)
-    .where(and(eq(tableSessions.id, input.sessionId), eq(tableSessions.status, "active")))
-    .limit(1);
+    if (!sessionRow) {
+      throw new Error("Faol seans topilmadi");
+    }
 
-  if (!sessionRow) {
-    throw new Error("Faol seans topilmadi");
-  }
+    const now = new Date();
+    const adjustmentId = createId("adjustment");
+    const currentShift = await getCurrentShiftRow(tx);
 
-  await db.insert(billAdjustments).values({
-    id: createId("adjustment"),
-    sessionId: input.sessionId,
-    operatorId: input.operatorId ?? null,
-    type: input.type,
-    amount: input.amount ?? null,
-    minutes: input.minutes ?? null,
-    reason: input.reason.trim(),
-    createdAt: new Date(),
+    await tx.insert(billAdjustments).values({
+      id: adjustmentId,
+      sessionId: input.sessionId,
+      operatorId: input.operatorId ?? null,
+      shiftId: currentShift?.id ?? null,
+      type: "manual_charge",
+      amount: input.amount,
+      minutes: null,
+      reason: input.reason?.trim() || null,
+      createdAt: now,
+    });
+
+    await appendAuditLog(tx, {
+      operatorId: input.operatorId ?? null,
+      action: "bill.adjustment.created",
+      entityType: "bill",
+      entityId: adjustmentId,
+      description: "Qo'lda billing tuzatishi qo'shildi",
+      metadata: {
+        sessionId: input.sessionId,
+        amount: input.amount,
+        shiftId: currentShift?.id ?? null,
+      },
+    });
   });
 }
 
@@ -943,6 +1406,7 @@ export async function createReservation(input: {
   startAt: string;
   endAt: string;
   note?: string;
+  operatorId?: string;
 }) {
   const db = requireDatabase();
 
@@ -963,8 +1427,9 @@ export async function createReservation(input: {
     }
 
     const now = new Date();
+    const reservationId = createId("reservation");
     await tx.insert(reservations).values({
-      id: createId("reservation"),
+      id: reservationId,
       tableId: input.tableId,
       customerName: input.customerName,
       phone: input.phone,
@@ -975,6 +1440,17 @@ export async function createReservation(input: {
       status: "scheduled",
       createdAt: now,
       updatedAt: now,
+    });
+    await appendAuditLog(tx, {
+      operatorId: input.operatorId ?? null,
+      action: "reservation.created",
+      entityType: "reservation",
+      entityId: reservationId,
+      description: "Yangi bron yaratildi",
+      metadata: {
+        tableId: input.tableId,
+        customerName: input.customerName,
+      },
     });
   });
 }
@@ -990,6 +1466,7 @@ export async function updateReservation(
     note?: string;
     status?: Reservation["status"];
     convertToSession?: boolean;
+    operatorId?: string;
   },
 ) {
   const db = requireDatabase();
@@ -1088,6 +1565,18 @@ export async function updateReservation(
         updatedAt: now,
       })
       .where(eq(reservations.id, reservationId));
+
+    await appendAuditLog(tx, {
+      operatorId: input.operatorId ?? null,
+      action: input.convertToSession ? "reservation.converted" : "reservation.updated",
+      entityType: "reservation",
+      entityId: reservationId,
+      description: input.convertToSession ? "Bron faol seansga aylantirildi" : "Bron yangilandi",
+      metadata: {
+        status: nextReservation.status,
+        sessionId,
+      },
+    });
   });
 }
 
@@ -1101,7 +1590,11 @@ export async function getReport(range: ReportRange): Promise<RangeReport> {
     orders: state.orders,
     orderItems: state.orderItems,
     products: state.products,
+    categories: state.categories,
+    cashMovements: state.cashMovements,
     billAdjustments: state.billAdjustments,
+    shifts: state.shifts,
+    operators: state.operators,
   });
 }
 
@@ -1116,6 +1609,7 @@ export async function updateSettings(input: {
   showActivityChart?: boolean;
   showRightRail?: boolean;
   tables?: Array<{ id: string; name: string; type: "standard" | "vip" }>;
+  operatorId?: string;
 }) {
   const db = requireDatabase();
 
@@ -1170,15 +1664,27 @@ export async function updateSettings(input: {
             email: (input.operatorEmail ?? primaryOperator.email).trim().toLowerCase(),
             updatedAt: now,
           })
-          .where(eq(operators.id, primaryOperator.id));
+        .where(eq(operators.id, primaryOperator.id));
       }
     }
+
+    await appendAuditLog(tx, {
+      operatorId: input.operatorId ?? null,
+      action: "settings.updated",
+      entityType: "settings",
+      entityId: settingsRow.id,
+      description: "Klub sozlamalari yangilandi",
+      metadata: {
+        clubName: input.clubName ?? settingsRow.clubName,
+        timezone: input.timezone ?? settingsRow.timezone,
+      },
+    });
   });
 }
 
 export async function updateInventory(
   input:
-    | {
+    ({
         action: "product";
         productId: string;
         name?: string;
@@ -1194,7 +1700,10 @@ export async function updateInventory(
         type: "in" | "out" | "correction";
         quantity: number;
         reason: string;
-      },
+      })
+    & {
+      operatorId?: string;
+    },
 ) {
   const db = requireDatabase();
 
@@ -1223,6 +1732,13 @@ export async function updateInventory(
           updatedAt: now,
         })
         .where(eq(products.id, productRow.id));
+      await appendAuditLog(tx, {
+        operatorId: input.operatorId ?? null,
+        action: "inventory.product.updated",
+        entityType: "inventory",
+        entityId: productRow.id,
+        description: `${productRow.name} mahsuloti yangilandi`,
+      });
       return;
     }
 
@@ -1260,6 +1776,18 @@ export async function updateInventory(
       reason: input.reason,
       resultingStock: nextStock,
       createdAt: now,
+    });
+    await appendAuditLog(tx, {
+      operatorId: input.operatorId ?? null,
+      action: "inventory.stock.updated",
+      entityType: "inventory",
+      entityId: productRow.id,
+      description: `${productRow.name} bo'yicha ombor harakati yozildi`,
+      metadata: {
+        type: input.type,
+        quantity: input.quantity,
+        resultingStock: nextStock,
+      },
     });
   });
 }

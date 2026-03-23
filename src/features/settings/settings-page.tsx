@@ -8,6 +8,7 @@ import {
   Mail,
   PenSquare,
   Rows3,
+  ShieldCheck,
   SlidersHorizontal,
   UserRound,
 } from "lucide-react";
@@ -23,9 +24,9 @@ import { ModalDismissButton, useToast } from "@/components/ui/modal-provider";
 import { patchJson } from "@/lib/client/api";
 import { useBootstrapQuery } from "@/lib/hooks/use-club-data";
 import { MetricCard, SectionHeader } from "@/features/shared";
-import type { TableType } from "@/types/club";
+import type { OperatorRole, TableType } from "@/types/club";
 
-type SettingsModal = "club" | "operator" | "pricing" | "display" | "tables" | null;
+type SettingsModal = "club" | "operator" | "pricing" | "display" | "tables" | "roles" | null;
 type TableDraft = { id: string; name: string; type: TableType };
 
 const currencyOptions = ["UZS", "USD", "RUB"];
@@ -134,12 +135,15 @@ export function SettingsPage() {
   const [showActivityChart, setShowActivityChart] = useState(true);
   const [showRightRail, setShowRightRail] = useState(true);
   const [tableDrafts, setTableDrafts] = useState<TableDraft[]>([]);
+  const [selectedOperatorId, setSelectedOperatorId] = useState("");
+  const [selectedRole, setSelectedRole] = useState<OperatorRole>("cashier");
 
   if (bootstrapQuery.isPending || !bootstrapQuery.data) {
     return <Panel className="min-h-[60vh] animate-pulse bg-white/5" />;
   }
 
   const { settings, tables } = bootstrapQuery.data;
+  const operators = bootstrapQuery.data.operators ?? [];
   const clubDirty = clubName !== settings.clubName || timezone !== settings.timezone;
   const operatorDirty =
     operatorName !== settings.operatorName || operatorEmail !== settings.operatorEmail;
@@ -155,6 +159,8 @@ export function SettingsPage() {
       const source = tables[index];
       return !source || source.id !== draft.id || source.name !== draft.name || source.type !== draft.type;
     });
+  const selectedOperator = operators.find((item) => item.id === selectedOperatorId) ?? null;
+  const rolesDirty = selectedOperator ? selectedOperator.role !== selectedRole : false;
 
   function closeModal() {
     setModal(null);
@@ -196,6 +202,28 @@ export function SettingsPage() {
     setModal("tables");
   }
 
+  function openRolesModal() {
+    const defaultOperator =
+      operators.find((item) => item.role === "cashier") ??
+      operators.find((item) => item.id !== bootstrapQuery.data?.operator.id) ??
+      operators[0] ??
+      null;
+    if (!defaultOperator) {
+      return;
+    }
+    setSelectedOperatorId(defaultOperator.id);
+    setSelectedRole(defaultOperator.role);
+    setModal("roles");
+  }
+
+  function syncSelectedOperator(nextId: string) {
+    setSelectedOperatorId(nextId);
+    const nextOperator = operators.find((item) => item.id === nextId);
+    if (nextOperator) {
+      setSelectedRole(nextOperator.role);
+    }
+  }
+
   function updateDraftTable(tableId: string, patch: Partial<TableDraft>) {
     setTableDrafts((current) =>
       current.map((table) => (table.id === tableId ? { ...table, ...patch } : table)),
@@ -220,6 +248,33 @@ export function SettingsPage() {
       } catch (error) {
         pushToast({
           title: "Sozlamalarni saqlab bo'lmadi",
+          description: error instanceof Error ? error.message : "Noma'lum xatolik yuz berdi",
+          tone: "error",
+        });
+      }
+    });
+  }
+
+  function saveOperatorRole() {
+    if (!selectedOperator) {
+      return;
+    }
+
+    startTransition(async () => {
+      try {
+        await patchJson<{ ok: true }>(`/api/operators/${selectedOperator.id}/role`, {
+          role: selectedRole,
+        });
+        await queryClient.invalidateQueries({ queryKey: ["bootstrap"] });
+        pushToast({
+          title: "Operator roli yangilandi",
+          description: `${selectedOperator.name} endi ${selectedRole === "admin" ? "Admin" : "Kassir"} rolida ishlaydi.`,
+          tone: "success",
+        });
+        closeModal();
+      } catch (error) {
+        pushToast({
+          title: "Rolni saqlab bo'lmadi",
           description: error instanceof Error ? error.message : "Noma'lum xatolik yuz berdi",
           tone: "error",
         });
@@ -317,6 +372,30 @@ export function SettingsPage() {
             }
           />
         </Reveal>
+
+        {bootstrapQuery.data.operator.role === "admin" ? (
+          <Reveal>
+            <SettingsOverviewCard
+              icon={<ShieldCheck className="h-5 w-5" />}
+              eyebrow="Roles"
+              title="Ruxsatlar"
+              description="Admin va kassir rollari shu bo'limdan boshqariladi. Kassirga faqat stol, bar, bron va dashboard ruxsat beriladi."
+              actionLabel="Rollarni boshqarish"
+              onAction={openRolesModal}
+              summary={
+                <>
+                  {operators.map((operatorItem) => (
+                    <SettingsSummaryRow
+                      key={operatorItem.id}
+                      label={`${operatorItem.name} (${operatorItem.email})`}
+                      value={operatorItem.role === "admin" ? "Admin" : "Kassir"}
+                    />
+                  ))}
+                </>
+              }
+            />
+          </Reveal>
+        ) : null}
       </div>
 
       <Reveal>
@@ -688,6 +767,78 @@ export function SettingsPage() {
                 </Select>
               </div>
             ))}
+          </div>
+        </div>
+      </ResponsiveModal>
+
+      <ResponsiveModal
+        open={modal === "roles"}
+        onClose={closeModal}
+        title="Operator rollari"
+        description="Admin to'liq nazorat qiladi. Kassir esa stol, bar, bron va dashboard bilan ishlaydi."
+        tone="cyan"
+        size="md"
+        icon={<ShieldCheck className="h-5 w-5" />}
+        closeGuard={{ when: rolesDirty }}
+        hotkeys={[
+          {
+            key: "s",
+            ctrlOrMeta: true,
+            allowInInput: true,
+            label: "Operator rolini saqlash",
+            action: saveOperatorRole,
+          },
+        ]}
+        footer={
+          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+            <ModalDismissButton variant="secondary" disabled={pending}>
+              Yopish
+            </ModalDismissButton>
+            <Button
+              disabled={pending || !selectedOperator || !rolesDirty}
+              onClick={saveOperatorRole}
+            >
+              {pending ? "Saqlanmoqda..." : "Rolni saqlash"}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-5">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <ModalStat label="Adminlar" value={`${operators.filter((item) => item.role === "admin").length}`} hint="To'liq ruxsat" />
+            <ModalStat label="Kassirlar" value={`${operators.filter((item) => item.role === "cashier").length}`} hint="Operatsion ruxsat" />
+            <ModalStat label="Faol operator" value={`${operators.filter((item) => item.isActive).length}`} hint="Aktiv akkauntlar" />
+          </div>
+          <ModalNote tone="cyan">
+            Kassirga hisobotlar, ombor va sozlamalar berilmaydi. Bu rol faqat zal operatsiyasi uchun mo&#39;ljallangan.
+          </ModalNote>
+          <div className="grid gap-4">
+            <div>
+              <label className="mb-2 block text-sm text-slate-400">Operator</label>
+              <Select value={selectedOperatorId} onChange={(event) => syncSelectedOperator(event.target.value)}>
+                {operators.map((operatorItem) => (
+                  <option key={operatorItem.id} value={operatorItem.id}>
+                    {operatorItem.name} - {operatorItem.email}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <label className="mb-2 block text-sm text-slate-400">Rol</label>
+              <Select value={selectedRole} onChange={(event) => setSelectedRole(event.target.value as OperatorRole)}>
+                <option value="admin">Admin</option>
+                <option value="cashier">Kassir</option>
+              </Select>
+            </div>
+            {selectedOperator ? (
+              <div className="rounded-[22px] border border-white/8 bg-white/[0.04] px-4 py-4">
+                <div className="text-sm font-semibold text-white">{selectedOperator.name}</div>
+                <div className="mt-2 text-sm text-slate-400">{selectedOperator.email}</div>
+                <div className="mt-3 text-xs uppercase tracking-[0.22em] text-cyan-300/70">
+                  Joriy rol: {selectedOperator.role === "admin" ? "Admin" : "Kassir"}
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </ResponsiveModal>

@@ -10,6 +10,7 @@ function api_issue_token(array $operator, array $config): string
         'id' => $operator['id'],
         'email' => $operator['email'],
         'name' => $operator['full_name'],
+        'role' => $operator['role'] ?? 'admin',
         'exp' => time() + API_TOKEN_TTL_SECONDS,
     ];
     $encodedPayload = api_base64url_encode(json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
@@ -72,7 +73,7 @@ function api_login_handler(array $config): array
     $pdo = api_pdo($config);
     $operator = api_fetch_one(
         $pdo,
-        'select id, full_name, email, password_hash, is_active from operators where email = :email limit 1',
+        'select id, full_name, email, password_hash, role, is_active from operators where email = :email limit 1',
         ['email' => $email]
     );
 
@@ -85,6 +86,7 @@ function api_login_handler(array $config): array
             'id' => $operator['id'],
             'name' => $operator['full_name'],
             'email' => $operator['email'],
+            'role' => $operator['role'] ?? 'admin',
             'mode' => 'database',
         ],
         'token' => api_issue_token($operator, $config),
@@ -102,7 +104,7 @@ function api_require_operator(array $config): array
     $pdo = api_pdo($config);
     $operator = api_fetch_one(
         $pdo,
-        'select id, full_name, email, is_active from operators where id = :id limit 1',
+        'select id, full_name, email, role, is_active from operators where id = :id limit 1',
         ['id' => $payload['id']]
     );
 
@@ -114,6 +116,14 @@ function api_require_operator(array $config): array
         'id' => $operator['id'],
         'name' => $operator['full_name'],
         'email' => $operator['email'],
+        'role' => $operator['role'] ?? 'admin',
         'mode' => 'database',
     ];
+}
+
+function api_require_role(array $operator, array $allowedRoles): void
+{
+    if (!in_array($operator['role'] ?? '', $allowedRoles, true)) {
+        throw new ApiException(403, 'Bu amal uchun ruxsat yetarli emas');
+    }
 }

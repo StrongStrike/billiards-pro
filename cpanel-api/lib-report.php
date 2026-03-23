@@ -226,6 +226,49 @@ function api_get_dashboard_activity(array $config): array
     return $points;
 }
 
+function api_cash_movement_signed_amount(array $movement): int
+{
+    if (in_array($movement['type'], ['service_out', 'expense', 'cash_drop'], true)) {
+        return -((int) $movement['amount']);
+    }
+
+    return (int) $movement['amount'];
+}
+
+function api_sum_session_order_total(string $sessionId, array $orders, array $orderItems): int
+{
+    $sessionOrderIds = [];
+    foreach ($orders as $order) {
+        if (($order['sessionId'] ?? null) === $sessionId && $order['status'] === 'paid') {
+            $sessionOrderIds[] = $order['id'];
+        }
+    }
+
+    return api_calculate_order_items_total(array_values(array_filter(
+        $orderItems,
+        static fn (array $item): bool => in_array($item['orderId'], $sessionOrderIds, true)
+    )));
+}
+
+function api_sum_completed_session_revenue(array $sessions, array $orders, array $orderItems, array $billAdjustments): int
+{
+    $sum = 0;
+    foreach ($sessions as $session) {
+        $sessionAdjustments = api_get_session_bill_adjustments($session['id'], $billAdjustments);
+        $sessionOrderTotal = api_sum_session_order_total($session['id'], $orders, $orderItems);
+        $sum += api_calculate_session_summary($session, $sessionOrderTotal, $sessionAdjustments, $session['endedAt'])['total'];
+    }
+
+    return $sum;
+}
+
+function api_shift_overlaps_window(array $shift, DateTimeImmutable $start, DateTimeImmutable $endExclusive, DateTimeImmutable $now): bool
+{
+    $openedAt = api_parse_time($shift['openedAt'])->getTimestamp();
+    $shiftEnd = api_parse_time($shift['closedAt'] ?? $now->format(DATE_ATOM))->getTimestamp();
+    return $openedAt < $endExclusive->getTimestamp() && $shiftEnd > $start->getTimestamp();
+}
+
 function api_build_report(array $config, string $range): array
 {
     $state = api_load_state($config);
@@ -250,6 +293,14 @@ function api_build_report(array $config, string $range): array
         $state['orderItems'],
         static fn (array $item): bool => in_array($item['orderId'], $relevantOrderIds, true)
     ));
+    $categoriesById = [];
+    foreach ($state['categories'] as $category) {
+        $categoriesById[$category['id']] = $category;
+    }
+    $operatorsById = [];
+    foreach ($state['operators'] as $operator) {
+        $operatorsById[$operator['id']] = $operator;
+    }
 
     $adjustmentsTotal = 0;
     $gameRevenue = 0;
@@ -308,6 +359,37 @@ function api_build_report(array $config, string $range): array
     usort($topTables, static fn (array $left, array $right): int => $right['revenue'] <=> $left['revenue']);
     $topTables = array_slice($topTables, 0, 5);
 
+    $tablePerformance = [];
+    foreach ($state['tables'] as $table) {
+        $tableSessions = array_values(array_filter(
+            $relevantSessions,
+            static fn (array $session): bool => $session['tableId'] === $table['id']
+        ));
+        $revenue = 0;
+        $minutes = 0;
+        foreach ($tableSessions as $session) {
+            $revenue += api_calculate_session_summary(
+                $session,
+                api_sum_session_order_total($session['id'], $relevantOrders, $relevantItems),
+                api_get_session_bill_adjustments($session['id'], $state['billAdjustments']),
+                $session['endedAt']
+            )['total'];
+            $minutes += api_difference_minutes($session['startedAt'], (string) $session['endedAt']);
+        }
+        $sessionsCount = count($tableSessions);
+        if ($revenue > 0 || $minutes > 0) {
+            $tablePerformance[] = [
+                'tableId' => $table['id'],
+                'tableName' => $table['name'],
+                'revenue' => $revenue,
+                'minutes' => $minutes,
+                'sessionsCount' => $sessionsCount,
+                'averageCheck' => $sessionsCount > 0 ? (int) round($revenue / $sessionsCount) : 0,
+            ];
+        }
+    }
+    usort($tablePerformance, static fn (array $left, array $right): int => $right['revenue'] <=> $left['revenue']);
+
     $topProducts = [];
     foreach ($state['products'] as $product) {
         $productItems = array_values(array_filter(
@@ -329,6 +411,125 @@ function api_build_report(array $config, string $range): array
     }
     usort($topProducts, static fn (array $left, array $right): int => $right['revenue'] <=> $left['revenue']);
     $topProducts = array_slice($topProducts, 0, 5);
+
+    $categorySales = [];
+    foreach ($state['categories'] as $category) {
+        $categoryProductIds = [];
+        foreach ($state['products'] as $product) {
+            if ($product['categoryId'] === $category['id']) {
+                $categoryProductIds[] = $product['id'];
+            }
+        }
+        $categoryItems = array_values(array_filter(
+            $relevantItems,
+            static fn (array $item): bool => in_array($item['productId'], $categoryProductIds, true)
+        ));
+        $quantity = 0;
+        foreach ($categoryItems as $item) {
+            $quantity += (int) $item['quantity'];
+        }
+        if ($quantity > 0) {
+            $categorySales[] = [
+                'categoryId' => $category['id'],
+                'categoryName' => $category['name'],
+                'revenue' => api_calculate_order_items_total($categoryItems),
+                'quantity' => $quantity,
+            ];
+        }
+    }
+    usort($categorySales, static fn (array $left, array $right): int => $right['revenue'] <=> $left['revenue']);
+
+    $lowStockAnalytics = [];
+    foreach ($state['products'] as $product) {
+        if (!$product['isActive'] || $product['stock'] > $product['threshold']) {
+            continue;
+        }
+        $lowStockAnalytics[] = [
+            'productId' => $product['id'],
+            'productName' => $product['name'],
+            'categoryName' => $categoriesById[$product['categoryId']]['name'] ?? 'Kategoriya',
+            'stock' => $product['stock'],
+            'threshold' => $product['threshold'],
+            'gap' => max((int) $product['threshold'] - (int) $product['stock'], 0),
+        ];
+    }
+    usort($lowStockAnalytics, static fn (array $left, array $right): int => ($right['gap'] <=> $left['gap']) ?: ($left['stock'] <=> $right['stock']));
+
+    $shiftHistory = [];
+    foreach ($state['shifts'] as $shift) {
+        if (!api_shift_overlaps_window($shift, $window['start'], $window['endExclusive'], $now)) {
+            continue;
+        }
+
+        $shiftStart = api_parse_time($shift['openedAt']);
+        $shiftEnd = api_parse_time($shift['closedAt'] ?? $now->format(DATE_ATOM));
+        $shiftSessions = array_values(array_filter($state['sessions'], static function (array $session) use ($shiftStart, $shiftEnd): bool {
+            return $session['status'] === 'completed'
+                && $session['endedAt']
+                && api_parse_time($session['endedAt'])->getTimestamp() >= $shiftStart->getTimestamp()
+                && api_parse_time($session['endedAt'])->getTimestamp() < $shiftEnd->getTimestamp();
+        }));
+        $shiftOrders = array_values(array_filter($state['orders'], static function (array $order) use ($shiftStart, $shiftEnd): bool {
+            if ($order['status'] !== 'paid') {
+                return false;
+            }
+            $stamp = $order['paidAt'] ?? $order['createdAt'];
+            $time = api_parse_time($stamp)->getTimestamp();
+            return $time >= $shiftStart->getTimestamp() && $time < $shiftEnd->getTimestamp();
+        }));
+        $shiftOrderIds = array_column($shiftOrders, 'id');
+        $shiftItems = array_values(array_filter(
+            $state['orderItems'],
+            static fn (array $item): bool => in_array($item['orderId'], $shiftOrderIds, true)
+        ));
+        $shiftRevenue = api_sum_completed_session_revenue($shiftSessions, $shiftOrders, $shiftItems, $state['billAdjustments']);
+        $shiftRevenue += api_calculate_order_items_total(array_values(array_filter(
+            $shiftItems,
+            static function (array $item) use ($shiftOrders): bool {
+                foreach ($shiftOrders as $order) {
+                    if ($order['id'] === $item['orderId']) {
+                        return empty($order['sessionId']);
+                    }
+                }
+                return false;
+            }
+        )));
+        $shiftCashMovementNet = 0;
+        foreach ($state['cashMovements'] as $movement) {
+            $createdAt = api_parse_time($movement['createdAt'])->getTimestamp();
+            if ($createdAt >= $shiftStart->getTimestamp() && $createdAt < $shiftEnd->getTimestamp()) {
+                $shiftCashMovementNet += api_cash_movement_signed_amount($movement);
+            }
+        }
+        $expectedCash = (int) $shift['openingCash'] + $shiftRevenue + $shiftCashMovementNet;
+        $discrepancy = array_key_exists('closingCash', $shift) && $shift['closingCash'] !== null
+            ? (int) $shift['closingCash'] - $expectedCash
+            : null;
+
+        $shiftHistory[] = [
+            'shiftId' => $shift['id'],
+            'status' => $shift['status'],
+            'openingCash' => $shift['openingCash'],
+            'closingCash' => $shift['closingCash'],
+            'revenue' => $shiftRevenue,
+            'cashMovementNet' => $shiftCashMovementNet,
+            'expectedCash' => $expectedCash,
+            'discrepancy' => $discrepancy,
+            'openedAt' => $shift['openedAt'],
+            'pausedAt' => $shift['pausedAt'],
+            'closedAt' => $shift['closedAt'],
+            'openedByOperatorName' => isset($operatorsById[$shift['openedByOperatorId'] ?? '']) ? $operatorsById[$shift['openedByOperatorId']]['name'] : null,
+            'closedByOperatorName' => isset($operatorsById[$shift['closedByOperatorId'] ?? '']) ? $operatorsById[$shift['closedByOperatorId']]['name'] : null,
+        ];
+    }
+    usort($shiftHistory, static fn (array $left, array $right): int => api_parse_time($right['openedAt'])->getTimestamp() <=> api_parse_time($left['openedAt'])->getTimestamp());
+
+    $cashDiscrepancyTotal = 0;
+    foreach ($shiftHistory as $shift) {
+        if ($shift['discrepancy'] !== null) {
+            $cashDiscrepancyTotal += (int) $shift['discrepancy'];
+        }
+    }
 
     $chart = [];
     foreach (api_get_report_chart_buckets($range, $state['settings']['timezone'], $now) as $bucket) {
@@ -409,8 +610,13 @@ function api_build_report(array $config, string $range): array
         'timezone' => $state['settings']['timezone'],
         'periodStart' => $window['start']->format(DATE_ATOM),
         'periodEnd' => $window['endExclusive']->modify('-1 minute')->format(DATE_ATOM),
+        'cashDiscrepancyTotal' => $cashDiscrepancyTotal,
         'topTables' => $topTables,
+        'tablePerformance' => $tablePerformance,
         'topProducts' => $topProducts,
+        'categorySales' => $categorySales,
+        'lowStockAnalytics' => $lowStockAnalytics,
+        'shiftHistory' => $shiftHistory,
         'chart' => $chart,
     ];
 }

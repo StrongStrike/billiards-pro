@@ -1,12 +1,12 @@
 import type { ReportRange } from "@/types/club";
 
 import { getReport } from "@/lib/server/club-service";
-import { ok, requireApiSession, unauthorizedResponse } from "@/lib/server/api";
+import { ok, requireApiRole } from "@/lib/server/api";
 
 export async function GET(request: Request) {
-  const session = await requireApiSession();
-  if (!session) {
-    return unauthorizedResponse();
+  const access = await requireApiRole(["admin"]);
+  if (access.response) {
+    return access.response;
   }
 
   const { searchParams } = new URL(request.url);

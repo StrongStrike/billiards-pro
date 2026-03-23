@@ -6,7 +6,21 @@ export type OrderMode = "table" | "counter";
 export type OrderStatus = "confirmed" | "paid" | "cancelled";
 export type StockMovementType = "in" | "out" | "correction";
 export type CashMovementType = "service_in" | "service_out" | "expense" | "cash_drop" | "change";
-export type BillAdjustmentType = "discount" | "compliment" | "free_minutes" | "manual_charge";
+export type BillAdjustmentType = "manual_charge";
+export type OperatorRole = "admin" | "cashier";
+export type ShiftStatus = "open" | "paused" | "closed";
+export type ShiftEventType = "opened" | "paused" | "resumed" | "closed";
+export type AuditEntityType =
+  | "auth"
+  | "shift"
+  | "session"
+  | "reservation"
+  | "order"
+  | "cash"
+  | "bill"
+  | "inventory"
+  | "settings"
+  | "operator";
 export type ReportRange = "day" | "week" | "month" | "year";
 
 export interface Table {
@@ -107,6 +121,7 @@ export interface CashMovement {
   amount: number;
   reason: string;
   operatorId?: string;
+  shiftId?: string;
   createdAt: string;
 }
 
@@ -114,10 +129,44 @@ export interface BillAdjustment {
   id: string;
   sessionId: string;
   operatorId?: string;
+  shiftId?: string;
   type: BillAdjustmentType;
-  amount?: number;
-  minutes?: number;
-  reason: string;
+  amount: number;
+  reason?: string;
+  createdAt: string;
+}
+
+export interface Shift {
+  id: string;
+  status: ShiftStatus;
+  openingCash: number;
+  closingCash?: number;
+  openedByOperatorId?: string;
+  closedByOperatorId?: string;
+  note?: string;
+  openedAt: string;
+  pausedAt?: string;
+  closedAt?: string;
+  updatedAt: string;
+}
+
+export interface ShiftEvent {
+  id: string;
+  shiftId: string;
+  operatorId?: string;
+  type: ShiftEventType;
+  note?: string;
+  createdAt: string;
+}
+
+export interface AuditLog {
+  id: string;
+  operatorId?: string;
+  action: string;
+  entityType: AuditEntityType;
+  entityId?: string;
+  description: string;
+  metadata?: string;
   createdAt: string;
 }
 
@@ -140,7 +189,6 @@ export interface SessionSummary {
   adjustmentAmount: number;
   total: number;
   durationMinutes: number;
-  freeMinutes: number;
 }
 
 export interface TableSnapshot {
@@ -180,11 +228,22 @@ export interface OperatorSession {
   id: string;
   name: string;
   email: string;
+  role: OperatorRole;
   mode: "database";
+}
+
+export interface OperatorSummary {
+  id: string;
+  name: string;
+  email: string;
+  role: OperatorRole;
+  isActive: boolean;
+  createdAt?: string;
 }
 
 export interface BootstrapPayload {
   operator: OperatorSession;
+  operators: OperatorSummary[];
   settings: ClubSettings;
   tables: TableSnapshot[];
   reservations: Reservation[];
@@ -196,6 +255,9 @@ export interface BootstrapPayload {
   stockMovements: StockMovement[];
   cashMovements: CashMovement[];
   billAdjustments: BillAdjustment[];
+  activeShift: Shift | null;
+  shiftEvents: ShiftEvent[];
+  auditLogs: AuditLog[];
   kpis: DashboardKpis;
   lowStockProducts: Product[];
   generatedAt: string;
@@ -215,7 +277,45 @@ export interface RangeReport {
   timezone: string;
   periodStart: string;
   periodEnd: string;
+  cashDiscrepancyTotal: number;
   topTables: Array<{ tableId: string; tableName: string; revenue: number; minutes: number }>;
+  tablePerformance: Array<{
+    tableId: string;
+    tableName: string;
+    revenue: number;
+    minutes: number;
+    sessionsCount: number;
+    averageCheck: number;
+  }>;
   topProducts: Array<{ productId: string; productName: string; revenue: number; quantity: number }>;
+  categorySales: Array<{
+    categoryId: string;
+    categoryName: string;
+    revenue: number;
+    quantity: number;
+  }>;
+  lowStockAnalytics: Array<{
+    productId: string;
+    productName: string;
+    categoryName: string;
+    stock: number;
+    threshold: number;
+    gap: number;
+  }>;
+  shiftHistory: Array<{
+    shiftId: string;
+    status: ShiftStatus;
+    openingCash: number;
+    closingCash?: number;
+    revenue: number;
+    cashMovementNet: number;
+    expectedCash: number;
+    discrepancy?: number;
+    openedAt: string;
+    pausedAt?: string;
+    closedAt?: string;
+    openedByOperatorName?: string;
+    closedByOperatorName?: string;
+  }>;
   chart: Array<{ label: string; revenue: number; sessions: number; occupancy: number }>;
 }

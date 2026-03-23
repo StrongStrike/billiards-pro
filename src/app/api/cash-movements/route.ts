@@ -1,18 +1,18 @@
 import { createCashMovement } from "@/lib/server/club-service";
-import { handleApiError, ok, requireApiSession, unauthorizedResponse } from "@/lib/server/api";
+import { handleApiError, ok, requireApiRole } from "@/lib/server/api";
 import { cashMovementSchema } from "@/lib/validations";
 
 export async function POST(request: Request) {
-  const session = await requireApiSession();
-  if (!session) {
-    return unauthorizedResponse();
+  const access = await requireApiRole(["admin", "cashier"]);
+  if (access.response) {
+    return access.response;
   }
 
   try {
     const payload = cashMovementSchema.parse(await request.json());
     await createCashMovement({
       ...payload,
-      operatorId: session.id,
+      operatorId: access.session.id,
     });
     return ok({ ok: true });
   } catch (error) {

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 
 import { getOperatorSession } from "@/lib/auth/session";
-import type { OperatorSession } from "@/types/club";
+import type { OperatorRole, OperatorSession } from "@/types/club";
 
 export async function requireApiSession() {
   const session = await getOperatorSession();
@@ -14,6 +14,27 @@ export async function requireApiSession() {
 
 export function unauthorizedResponse() {
   return NextResponse.json({ message: "Avval tizimga kiring" }, { status: 401 });
+}
+
+export function forbiddenResponse() {
+  return NextResponse.json({ message: "Bu amal uchun ruxsat yetarli emas" }, { status: 403 });
+}
+
+export function hasRoleAccess(session: OperatorSession, allowedRoles: OperatorRole[]) {
+  return allowedRoles.includes(session.role);
+}
+
+export async function requireApiRole(allowedRoles: OperatorRole[]) {
+  const session = await requireApiSession();
+  if (!session) {
+    return { session: null, response: unauthorizedResponse() } as const;
+  }
+
+  if (!hasRoleAccess(session, allowedRoles)) {
+    return { session: null, response: forbiddenResponse() } as const;
+  }
+
+  return { session, response: null } as const;
 }
 
 export function handleApiError(error: unknown) {

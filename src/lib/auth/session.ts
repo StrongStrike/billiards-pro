@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { verifyPassword } from "@/lib/auth/password";
 import { requireDatabase } from "@/lib/db/client";
 import { operators } from "@/lib/db/schema";
+import { createAuditLog } from "@/lib/server/club-service";
 import type { OperatorSession } from "@/types/club";
 
 const AUTH_NOT_CONFIGURED_MESSAGE =
@@ -118,6 +119,7 @@ export async function getOperatorSession(): Promise<OperatorSession | null> {
     id: operator.id,
     name: operator.fullName,
     email: operator.email,
+    role: operator.role,
     mode: "database",
   };
 }
@@ -154,12 +156,21 @@ export async function loginOperator(email: string, password: string) {
     maxAge: SESSION_TTL_SECONDS,
   });
 
+  await createAuditLog({
+    operatorId: operator.id,
+    action: "auth.login",
+    entityType: "auth",
+    entityId: operator.id,
+    description: "Operator tizimga kirdi",
+  });
+
   return {
     ok: true as const,
     session: {
       id: operator.id,
       email: operator.email,
       name: operator.fullName,
+      role: operator.role,
       mode: "database" as const,
     },
   };
@@ -171,9 +182,20 @@ export async function logoutOperator() {
   }
 
   const cookieStore = await cookies();
+  const currentSession = await getOperatorSession();
   cookieStore.set(SESSION_COOKIE_NAME, "", {
     ...SESSION_COOKIE_OPTIONS,
     expires: new Date(0),
     maxAge: 0,
   });
+
+  if (currentSession) {
+    await createAuditLog({
+      operatorId: currentSession.id,
+      action: "auth.logout",
+      entityType: "auth",
+      entityId: currentSession.id,
+      description: "Operator tizimdan chiqdi",
+    });
+  }
 }

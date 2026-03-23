@@ -9,10 +9,13 @@ import {
 } from "drizzle-orm/pg-core";
 
 import type {
+  OperatorRole,
   OrderMode,
   OrderStatus,
   ReservationStatus,
   SessionStatus,
+  ShiftEventType,
+  ShiftStatus,
   StockMovementType,
   TableType,
 } from "@/types/club";
@@ -35,6 +38,9 @@ export const cashMovementTypeEnum = pgEnum("cash_movement_type", [
   "cash_drop",
   "change",
 ]);
+export const operatorRoleEnum = pgEnum("operator_role", ["admin", "cashier"]);
+export const shiftStatusEnum = pgEnum("shift_status", ["open", "paused", "closed"]);
+export const shiftEventTypeEnum = pgEnum("shift_event_type", ["opened", "paused", "resumed", "closed"]);
 export const billAdjustmentTypeEnum = pgEnum("bill_adjustment_type", [
   "discount",
   "compliment",
@@ -47,6 +53,7 @@ export const operators = pgTable("operators", {
   fullName: text("full_name").notNull(),
   email: text("email").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  role: operatorRoleEnum("role").$type<OperatorRole>().notNull().default("admin"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -175,9 +182,46 @@ export const stockMovements = pgTable("stock_movements", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const shifts = pgTable("shifts", {
+  id: text("id").primaryKey(),
+  status: shiftStatusEnum("status").$type<ShiftStatus>().notNull(),
+  openingCash: integer("opening_cash").notNull().default(0),
+  closingCash: integer("closing_cash"),
+  openedByOperatorId: text("opened_by_operator_id").references(() => operators.id, { onDelete: "set null" }),
+  closedByOperatorId: text("closed_by_operator_id").references(() => operators.id, { onDelete: "set null" }),
+  note: text("note"),
+  openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+  pausedAt: timestamp("paused_at", { withTimezone: true }),
+  closedAt: timestamp("closed_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const shiftEvents = pgTable("shift_events", {
+  id: text("id").primaryKey(),
+  shiftId: text("shift_id")
+    .notNull()
+    .references(() => shifts.id, { onDelete: "cascade" }),
+  operatorId: text("operator_id").references(() => operators.id, { onDelete: "set null" }),
+  type: shiftEventTypeEnum("type").$type<ShiftEventType>().notNull(),
+  note: text("note"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const auditLogs = pgTable("audit_logs", {
+  id: text("id").primaryKey(),
+  operatorId: text("operator_id").references(() => operators.id, { onDelete: "set null" }),
+  action: text("action").notNull(),
+  entityType: text("entity_type").notNull(),
+  entityId: text("entity_id"),
+  description: text("description").notNull(),
+  metadata: text("metadata"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const cashMovements = pgTable("cash_movements", {
   id: text("id").primaryKey(),
   operatorId: text("operator_id").references(() => operators.id, { onDelete: "set null" }),
+  shiftId: text("shift_id").references(() => shifts.id, { onDelete: "set null" }),
   type: cashMovementTypeEnum("type").notNull(),
   amount: integer("amount").notNull(),
   reason: text("reason").notNull(),
@@ -190,10 +234,11 @@ export const billAdjustments = pgTable("bill_adjustments", {
     .notNull()
     .references(() => tableSessions.id, { onDelete: "cascade" }),
   operatorId: text("operator_id").references(() => operators.id, { onDelete: "set null" }),
+  shiftId: text("shift_id").references(() => shifts.id, { onDelete: "set null" }),
   type: billAdjustmentTypeEnum("type").notNull(),
   amount: integer("amount"),
   minutes: integer("minutes"),
-  reason: text("reason").notNull(),
+  reason: text("reason"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -239,6 +284,10 @@ export const productsRelations = relations(products, ({ one, many }) => ({
 }));
 
 export const operatorsRelations = relations(operators, ({ many }) => ({
+  shiftsOpened: many(shifts, { relationName: "shift_opened_by" }),
+  shiftsClosed: many(shifts, { relationName: "shift_closed_by" }),
+  shiftEvents: many(shiftEvents),
+  auditLogs: many(auditLogs),
   cashMovements: many(cashMovements),
   billAdjustments: many(billAdjustments),
 }));
@@ -287,6 +336,10 @@ export const cashMovementsRelations = relations(cashMovements, ({ one }) => ({
     fields: [cashMovements.operatorId],
     references: [operators.id],
   }),
+  shift: one(shifts, {
+    fields: [cashMovements.shiftId],
+    references: [shifts.id],
+  }),
 }));
 
 export const billAdjustmentsRelations = relations(billAdjustments, ({ one }) => ({
@@ -296,6 +349,44 @@ export const billAdjustmentsRelations = relations(billAdjustments, ({ one }) => 
   }),
   operator: one(operators, {
     fields: [billAdjustments.operatorId],
+    references: [operators.id],
+  }),
+  shift: one(shifts, {
+    fields: [billAdjustments.shiftId],
+    references: [shifts.id],
+  }),
+}));
+
+export const shiftsRelations = relations(shifts, ({ one, many }) => ({
+  openedBy: one(operators, {
+    relationName: "shift_opened_by",
+    fields: [shifts.openedByOperatorId],
+    references: [operators.id],
+  }),
+  closedBy: one(operators, {
+    relationName: "shift_closed_by",
+    fields: [shifts.closedByOperatorId],
+    references: [operators.id],
+  }),
+  events: many(shiftEvents),
+  cashMovements: many(cashMovements),
+  billAdjustments: many(billAdjustments),
+}));
+
+export const shiftEventsRelations = relations(shiftEvents, ({ one }) => ({
+  shift: one(shifts, {
+    fields: [shiftEvents.shiftId],
+    references: [shifts.id],
+  }),
+  operator: one(operators, {
+    fields: [shiftEvents.operatorId],
+    references: [operators.id],
+  }),
+}));
+
+export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
+  operator: one(operators, {
+    fields: [auditLogs.operatorId],
     references: [operators.id],
   }),
 }));
