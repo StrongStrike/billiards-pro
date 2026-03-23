@@ -22,8 +22,17 @@ BEGIN
 END
 $$;
 
-ALTER TABLE operators
-  ADD COLUMN IF NOT EXISTS role operator_role NOT NULL DEFAULT 'admin';
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'operators' AND column_name = 'role'
+  ) THEN
+    ALTER TABLE operators
+      ADD COLUMN role operator_role NOT NULL DEFAULT 'admin';
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS shifts (
   id text PRIMARY KEY,
@@ -59,11 +68,29 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-ALTER TABLE cash_movements
-  ADD COLUMN IF NOT EXISTS shift_id text REFERENCES shifts(id) ON DELETE SET NULL;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'cash_movements' AND column_name = 'shift_id'
+  ) THEN
+    ALTER TABLE cash_movements
+      ADD COLUMN shift_id text REFERENCES shifts(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
-ALTER TABLE bill_adjustments
-  ADD COLUMN IF NOT EXISTS shift_id text REFERENCES shifts(id) ON DELETE SET NULL;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'bill_adjustments' AND column_name = 'shift_id'
+  ) THEN
+    ALTER TABLE bill_adjustments
+      ADD COLUMN shift_id text REFERENCES shifts(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
 ALTER TABLE bill_adjustments
   ALTER COLUMN reason DROP NOT NULL;
